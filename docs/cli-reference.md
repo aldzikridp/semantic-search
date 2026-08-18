@@ -407,3 +407,43 @@ semsearch init --recreate --yes
 # 3. Re-ingest everything
 semsearch ingest-dir docs/
 ```
+
+## Global Options
+
+### `--config` / `-c`
+
+Specify a custom config file path instead of the default `.env`.
+
+```bash
+semsearch --config prod.env search "query"
+semsearch -c staging.env ingest file.md
+semsearch -c /path/to/config.env stats
+```
+
+**Notes:**
+- File must exist (error if not found)
+- Environment variables override config file values
+- If not specified, uses `.env` in current directory
+
+**Example config files:**
+
+```bash
+# prod.env
+SEMSEARCH_DATABASE_URL=postgresql://prod:pass@prod-db:5432/semsearch
+SEMSEARCH_EMBEDDING_PROVIDER__TYPE=openai
+SEMSEARCH_EMBEDDING_PROVIDER__MODEL=text-embedding-3-large
+
+# staging.env
+SEMSEARCH_DATABASE_URL=postgresql://staging:pass@staging-db:5432/semsearch
+SEMSEARCH_EMBEDDING_PROVIDER__TYPE=openrouter
+SEMSEARCH_EMBEDDING_PROVIDER__MODEL=openai/text-embedding-3-small
+```
+
+**Environment variable override:**
+
+```bash
+# Config file has: SEMSEARCH_DATABASE_URL=postgres://...
+# Env var overrides:
+SEMSEARCH_DATABASE_URL=postgres://other semsearch --config prod.env search "query"
+# Uses postgres://other (env var wins)
+```

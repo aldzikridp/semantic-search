@@ -202,6 +202,17 @@ semsearch search "query" --rerank --k 5
 
 **Flow:** Vector search (k*4 candidates) → Reranker → Top-k results with `rerank_score` in metadata.
 
+### 14. Custom config files
+
+Use `--config` (`-c`) to specify a custom config file:
+
+```bash
+semsearch --config prod.env search "query"
+semsearch -c staging.env stats
+```
+
+**Implementation:** Global callback stores path in `_config_path`, all commands use `get_settings(_config_path)`.
+
 ---
 
 ## Provider Configuration

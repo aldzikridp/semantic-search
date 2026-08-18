@@ -9,7 +9,7 @@ from typing import Optional
 import typer
 from pydantic import SecretStr
 
-from semsearch.config import Settings
+from semsearch.config import Settings, get_settings
 from semsearch.errors import SemSearchError
 from semsearch.models import BatchIngestResult, DeleteResult, IngestResult
 from semsearch.service import SemanticSearchService
@@ -19,6 +19,28 @@ app = typer.Typer(
     help="Semantic search over local documents.",
     add_completion=False,
 )
+
+# Store config path globally for commands to use
+_config_path: Path | None = None
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config file (default: .env)",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    ctx: typer.Context = typer.Option(None, hidden=True),
+) -> None:
+    """Semantic search over local documents."""
+    global _config_path
+    _config_path = config
 
 
 def _apply_provider_overrides(
@@ -55,7 +77,7 @@ def init(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation for --recreate"),
 ) -> None:
     """Create / migrate the chunks table."""
-    settings = Settings()
+    settings = get_settings(_config_path)
     if recreate and not yes:
         if not typer.confirm("This will DELETE all data. Continue?"):
             raise typer.Exit(1)
@@ -78,7 +100,7 @@ def ingest(
 ) -> None:
     """Ingest a single file."""
     settings = _apply_provider_overrides(
-        Settings(), provider, provider_model, provider_order,
+        get_settings(_config_path), provider, provider_model, provider_order,
         provider_allow_fallbacks, provider_ignore, provider_base_url, provider_api_key,
     )
     with SemanticSearchService.from_settings(settings) as svc:
@@ -98,7 +120,7 @@ def ingest_dir(
     force: bool = typer.Option(False, "--force", help="Force re-embed unchanged chunks"),
 ) -> None:
     """Recursively ingest all supported files in a directory."""
-    settings = Settings()
+    settings = get_settings(_config_path)
     with SemanticSearchService.from_settings(settings) as svc:
         result = svc.ingest_dir(
             dir_path,
@@ -121,7 +143,7 @@ def search(
     rerank: bool = typer.Option(False, "--rerank", help="Rerank results using configured reranker"),
 ) -> None:
     """Run a similarity search."""
-    settings = Settings()
+    settings = get_settings(_config_path)
     filter_dict = json.loads(filter) if filter else None
     with SemanticSearchService.from_settings(settings) as svc:
         results = svc.search(query, k=k, filter=filter_dict, rerank=rerank)
@@ -151,7 +173,7 @@ def delete(
         typer.echo("Provide --filter or --all", err=True)
         raise typer.Exit(1)
 
-    settings = Settings()
+    settings = get_settings(_config_path)
     with SemanticSearchService.from_settings(settings) as svc:
         result = svc.delete(filter_dict)
         typer.echo(json.dumps(result.model_dump(), indent=2, default=str))
@@ -160,7 +182,7 @@ def delete(
 @app.command()
 def stats() -> None:
     """Show table stats."""
-    settings = Settings()
+    settings = get_settings(_config_path)
     with SemanticSearchService.from_settings(settings) as svc:
         result = svc.stats()
         typer.echo(json.dumps(result, indent=2, default=str))
@@ -171,7 +193,7 @@ def reingest(
     path: Path = typer.Argument(..., help="File to reingest"),
 ) -> None:
     """Delete + ingest in one step."""
-    settings = Settings()
+    settings = get_settings(_config_path)
     with SemanticSearchService.from_settings(settings) as svc:
         result = svc.reingest(path)
         typer.echo(json.dumps(result.model_dump(), indent=2, default=str))

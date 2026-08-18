@@ -75,6 +75,7 @@ def settings(pg_url):
     """Settings using test database."""
     return Settings(
         database_url=pg_url,
+        collection_name="semsearch_chunks_test",
         embedding_provider=EmbeddingProviderConfig(
             type="openai",
             model="text-embedding-3-small",
@@ -97,6 +98,7 @@ def service(pg_url, mock_embeddings):
 
     settings = Settings(
         database_url=pg_url,
+        collection_name="semsearch_chunks_test",
         embedding_provider=EmbeddingProviderConfig(
             type="openai",
             model="text-embedding-3-small",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
@@ -123,3 +124,17 @@ class Settings(BaseSettings):
 
     # ---- Reranker (optional) ----
     reranker: RerankerProviderConfig | None = None
+
+
+def get_settings(config_path: str | Path | None = None) -> Settings:
+    """Load settings from specified or default config file.
+
+    Args:
+        config_path: Path to .env file. If None, uses default (.env).
+
+    Returns:
+        Settings instance.
+    """
+    if config_path:
+        return Settings(_env_file=str(config_path))
+    return Settings()

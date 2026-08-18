@@ -536,3 +536,15 @@ src/semsearch/
 ├── splitter.py     # Text chunking
 └── store.py        # PostgreSQL + pgvector
 ```
+
+## Custom Config Files
+
+Use `--config` (`-c`) to specify a custom config file:
+
+```bash
+semsearch --config prod.env search "query"
+semsearch -c staging.env ingest file.md
+semsearch -c /path/to/config.env stats
+```
+
+If not specified, uses `.env` in current directory. Environment variables override config file values.
