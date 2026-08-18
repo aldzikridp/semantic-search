@@ -30,10 +30,15 @@ LC_ID_COLUMN = "langchain_id"
 
 def build_engine(settings: Settings) -> PGEngine:
     """Construct a PGEngine bound to settings.database_url."""
-    # PGEngine uses asyncpg internally; convert psycopg URL if needed
+    # Normalize URL for SQLAlchemy/asyncpg
     url = settings.database_url
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
     if "+psycopg" in url:
         url = url.replace("+psycopg", "+asyncpg")
+    elif "+asyncpg" not in url and "+psycopg" not in url:
+        # Add asyncpg driver if no driver specified
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return PGEngine.from_connection_string(url=url)
 
 
@@ -132,11 +137,13 @@ def init_schema(
         conn.autocommit = True
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
-                    f"ON {table} USING hnsw (embedding vector_cosine_ops) "
-                    f"WITH (m = 16, ef_construction = 64)"
-                )
+                # HNSW index has 2000 dim limit; skip for high-dimensional vectors
+                if vector_size <= 2000:
+                    cur.execute(
+                        f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
+                        f"ON {table} USING hnsw (embedding vector_cosine_ops) "
+                        f"WITH (m = 16, ef_construction = 64)"
+                    )
                 cur.execute(
                     f"CREATE INDEX IF NOT EXISTS {table}_metadata_gin_idx "
                     f"ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops)"

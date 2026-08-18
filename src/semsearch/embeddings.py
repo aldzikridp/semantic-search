@@ -60,6 +60,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
             base_url=base_url,
             model=cfg.model,
             model_kwargs=model_kwargs,
+            check_embedding_ctx_length=False,
         )
 
     raise ProviderConfigError(f"unknown embedding provider type: {cfg.type}")

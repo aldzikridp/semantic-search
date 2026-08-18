@@ -56,7 +56,11 @@ class SemanticSearchService:
         self.engine = engine
         self.embedder = embedder
         self._store = store
-        self._db_url = settings.database_url.replace("+psycopg", "")
+        # Normalize URL for raw psycopg connections
+        db_url = settings.database_url
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        self._db_url = db_url.replace("+psycopg", "").replace("+asyncpg", "")
 
     @property
     def store(self) -> Any:
@@ -87,7 +91,12 @@ class SemanticSearchService:
     def close(self) -> None:
         """Release the underlying PGEngine connection pool."""
         try:
-            self.engine.close()
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(self.engine.close())
+            finally:
+                loop.close()
         except Exception:
             pass
 
