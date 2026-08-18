@@ -1,0 +1,256 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+# Hatch needs to know that the import package lives under src/.
+# `semsearch` is the import name; `src/semsearch` is where it lives (spec §5).
+[tool.hatch.build.targets.wheel]
+packages = ["src/semsearch"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/semsearch",
+    "tests",
+    "scripts",
+    "README.md",
+    ".env.example",
+    "requirements.txt",
+    "spec.md",
+]
+
+[project]
+name = "pg-semantic-search"
+version = "1.0.0"
+description = "Semantic search service over a small corpus of local documents using LangChain and PostgreSQL + pgvector."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Semantic Search Team" },
+]
+keywords = [
+    "semantic-search",
+    "langchain",
+    "pgvector",
+    "postgres",
+    "postgresql",
+    "embeddings",
+    "vector-search",
+    "rag",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+
+# ----------------------------------------------------------------------------
+# Runtime dependencies
+# ----------------------------------------------------------------------------
+# Mirrors the pinned baseline from spec §2 ("Pinned versions (recommended
+# requirements.txt baseline)"). Expressed as `>=` lower bounds so the package
+# remains installable alongside other tooling; the exact pins live in
+# requirements.txt for reproducible deployments.
+#
+# Embedding-provider packages (langchain-openai / -huggingface / -ollama) are
+# NOT in the core list — they are loaded lazily based on
+# SEMSEARCH_EMBEDDING_PROVIDER__TYPE (spec §2: "Loaded lazily based on
+# EMBEDDING_PROVIDER_TYPE"). They live in the optional extras below so users
+# only install the provider they actually use.
+# ----------------------------------------------------------------------------
+dependencies = [
+    "langchain>=0.2.16",
+    "langchain-core>=0.2.41",
+    "langchain-postgres>=0.0.17",          # required for filtered delete(filter=...)
+    "langchain-community>=0.2.16",         # TextLoader, PyMuPDFLoader, CSVLoader, JSONLoader
+    "langchain-text-splitters>=0.2.4",     # RecursiveCharacterTextSplitter
+    "psycopg[binary]>=3.2.1",              # psycopg3, sync driver for langchain-postgres + write-path SQL
+    "pgvector>=0.3.5",                     # vector column type binding
+    "sqlalchemy>=2.0.32",                  # service-owned write path (INSERT ... ON CONFLICT, etc.)
+    "pydantic>=2.8.2",
+    "pydantic-settings>=2.4.0",            # env_nested_delimiter="__" for EmbeddingProviderConfig
+    "typer>=0.12.3",                       # CLI
+    "pymupdf>=1.24.10",                    # PyMuPDFLoader backend
+    "python-dotenv>=1.0.1",                # .env loading
+    "jq>=1.7.0",                           # required by langchain_community.document_loaders.JSONLoader
+]
+
+# ----------------------------------------------------------------------------
+# Optional dependencies (extras)
+# ----------------------------------------------------------------------------
+# Provider extras — install exactly the one you plan to use:
+#   pip install -e ".[openai]"
+#   pip install -e ".[huggingface]"
+#   pip install -e ".[ollama]"
+#   pip install -e ".[all]"           # all three providers
+#
+# `langchain-openai` covers three provider types per spec §2: openai,
+# openai_compatible, and openrouter — all three go through OpenAI's SDK
+# against different base_urls.
+# ----------------------------------------------------------------------------
+[project.optional-dependencies]
+openai = [
+    "langchain-openai>=0.1.22",            # openai, openai_compatible, openrouter
+]
+huggingface = [
+    "langchain-huggingface>=0.0.3",
+    "sentence-transformers>=3.0.1",        # runtime dep of langchain-huggingface
+]
+ollama = [
+    "langchain-ollama>=0.1.0",
+]
+all = [
+    "langchain-openai>=0.1.22",
+    "langchain-huggingface>=0.0.3",
+    "sentence-transformers>=3.0.1",
+    "langchain-ollama>=0.1.0",
+]
+
+# Test extra — mirrors spec §2 test pins + pytest-cov for the ≥85% coverage
+# target (spec §11.1, §16 acceptance checklist).
+test = [
+    "pytest>=8.3.2",
+    "pytest-asyncio>=0.23.8",
+    "pytest-cov>=5.0.0",
+    "testcontainers>=4.8.1",              # real Postgres + pgvector in CI
+]
+
+# Dev extra — everything a contributor needs locally.
+dev = [
+    "pg-semantic-search[test]",
+    "pg-semantic-search[all]",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+# Entry point: `semsearch` command → typer app object (spec §8).
+# Typer's Typer object is itself a valid console-script target.
+[project.scripts]
+semsearch = "semsearch.cli:app"
+
+# ----------------------------------------------------------------------------
+# pytest
+# ----------------------------------------------------------------------------
+# `src/` layout (spec §5) — make `import semsearch` work without an explicit
+# install by adding src/ to sys.path. `addopts` enforces the ≥85% coverage
+# target on the package (spec §11.1, §16).
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.3"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=semsearch",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=85",
+]
+markers = [
+    "integration: tests that require a real Postgres + pgvector container (spec §11.1)",
+    "unit: pure-function tests with no DB (spec §11.2)",
+    "cli: CLI tests using typer.testing.CliRunner (spec §11.2)",
+]
+asyncio_mode = "auto"
+
+# ----------------------------------------------------------------------------
+# coverage
+# ----------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["semsearch"]
+branch = true
+omit = [
+    "src/semsearch/__init__.py",
+    "tests/*",
+]
+
+[tool.coverage.paths]
+semsearch = [
+    "src/semsearch",
+    "*/site-packages/semsearch",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+# ----------------------------------------------------------------------------
+# ruff — fast linter + formatter (replaces black + flake8 + isort)
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import sorting)
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "N",    # pep8-naming
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]   # `assert False` is fine in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["semsearch"]
+
+# ----------------------------------------------------------------------------
+# mypy
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["semsearch"]
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# pydantic-settings v2 needs the plugin for proper type inference.
+[[tool.mypy.overrides]]
+module = ["pydantic_settings.*", "pydantic.*"]
+plugins = ["pydantic.mypy"]
+
+# LangChain ecosystem ships with loose typing; don't fail CI on its internals.
+[[tool.mypy.overrides]]
+module = [
+    "langchain.*",
+    "langchain_community.*",
+    "langchain_core.*",
+    "langchain_postgres.*",
+    "langchain_text_splitters.*",
+    "langchain_openai.*",
+    "langchain_huggingface.*",
+    "langchain_ollama.*",
+    "psycopg.*",
+    "pgvector.*",
+    "testcontainers.*",
+    "jq",
+]
+ignore_missing_imports = true
