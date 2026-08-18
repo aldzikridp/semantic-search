@@ -1,6 +1,6 @@
 # TASK-004: Document Loaders
 
-> **Phase**: 4 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 4 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-001 (langchain-core)
 > **Blocks**: TASK-008
 
