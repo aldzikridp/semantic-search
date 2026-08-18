@@ -26,11 +26,13 @@ def pg_container():
 @pytest.fixture(scope="session")
 def settings(pg_container):
     from semsearch.config import Settings, EmbeddingProviderConfig
+    from pydantic import SecretStr
     return Settings(
         database_url=pg_container.get_connection_url(driver="psycopg"),
         embedding_provider=EmbeddingProviderConfig(
-            type="huggingface",
-            model="sentence-transformers/all-MiniLM-L6-v2",
+            type="openai",
+            model="text-embedding-3-small",
+            api_key=SecretStr("test-key-for-mocking"),
         ),
     )
 
@@ -200,7 +202,7 @@ Create `tests/fixtures/` with:
 1. **Each test gets fresh table** — `svc.init_schema(recreate=True)` in fixture
 2. **CASE D test requires file modification** — Use `tmp_path` fixture
 3. **Mock `embed_documents`** — To verify call count for idempotency
-4. **HuggingFace model loads once** — Session-scoped container, model cached
+4. **Mock embedding provider** — Use mocked OpenAI or similar for integration tests
 
 ## Verification
 

@@ -21,7 +21,6 @@ langchain-postgres==0.0.17
 langchain-community==0.2.16
 langchain-text-splitters==0.2.4
 langchain-openai==0.1.22
-langchain-huggingface==0.0.3
 langchain-ollama==0.1.0
 psycopg[binary]==3.2.1
 pgvector==0.3.5
@@ -31,13 +30,14 @@ pydantic-settings==2.4.0
 typer==0.12.3
 pymupdf==1.24.10
 python-dotenv==1.0.1
-sentence-transformers==3.0.1
 jq==1.7.0
 pytest==8.3.2
 pytest-asyncio==0.23.8
 testcontainers==4.8.1
 pytest-cov
 ```
+
+**Note**: HuggingFace local embeddings removed — rely entirely on API providers (OpenAI, OpenRouter, OpenAI-compatible, Ollama).
 
 ### 2. `pyproject.toml` (update existing)
 

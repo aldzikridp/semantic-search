@@ -29,7 +29,7 @@
 
 ## 1. Overview
 
-This plan implements a Python CLI library (`semsearch`) that provides semantic search over local documents using LangChain + PostgreSQL + pgvector. The implementation follows the spec's architecture exactly: service-owned write path (SQLAlchemy transactions), `PGVectorStore` for search/delete, configurable embedding providers (OpenAI, HuggingFace, Ollama, OpenRouter, OpenAI-compatible), and a `typer` CLI.
+This plan implements a Python CLI library (`semsearch`) that provides semantic search over local documents using LangChain + PostgreSQL + pgvector. The implementation follows the spec's architecture exactly: service-owned write path (SQLAlchemy transactions), `PGVectorStore` for search/delete, configurable embedding providers (OpenAI, Ollama, OpenRouter, OpenAI-compatible), and a `typer` CLI.
 
 **Key architectural decisions from the spec that must be honored:**
 - Write path is service-owned SQL (NOT `PGVectorStore.add_documents`) for atomicity and precomputed embeddings.
@@ -38,6 +38,7 @@ This plan implements a Python CLI library (`semsearch`) that provides semantic s
 - Content-hash caching (CASE A/B/C/D) avoids re-embedding unchanged chunks.
 - Search scores are converted: `score = 1.0 - cosine_distance`.
 - OpenRouter routing uses `model_kwargs={"extra_body": {...}}` (NOT a direct `extra_body=` kwarg).
+- **Embedding providers are API-based only** — HuggingFace local embeddings removed in favor of API providers (OpenAI, OpenRouter, OpenAI-compatible, Ollama).
 
 ---
 
@@ -50,7 +51,7 @@ This plan implements a Python CLI library (`semsearch`) that provides semantic s
 - [ ] Project directory exists at `/home/master-x/Project/semantic-search`
 - [ ] Git initialized (already done)
 
-**No external services needed for development** — HuggingFace (default provider) runs locally, and testcontainers spins up Postgres automatically for tests.
+**External API key required** — The default provider (OpenAI) requires an API key. Ollama also supported as a local option. Testcontainers spins up Postgres automatically for tests.
 
 ---
 
@@ -71,7 +72,6 @@ langchain-postgres==0.0.17
 langchain-community==0.2.16
 langchain-text-splitters==0.2.4
 langchain-openai==0.1.22
-langchain-huggingface==0.0.3
 langchain-ollama==0.1.0
 psycopg[binary]==3.2.1
 pgvector==0.3.5
@@ -81,13 +81,14 @@ pydantic-settings==2.4.0
 typer==0.12.3
 pymupdf==1.24.10
 python-dotenv==1.0.1
-sentence-transformers==3.0.1
 jq==1.7.0
 pytest==8.3.2
 pytest-asyncio==0.23.8
 testcontainers==4.8.1
 pytest-cov  # for coverage reporting
 ```
+
+**Note**: HuggingFace local embeddings removed — rely entirely on API providers (OpenAI, OpenRouter, OpenAI-compatible, Ollama).
 
 ### 3.2 `pyproject.toml` (update existing)
 
@@ -134,15 +135,14 @@ Ensure it includes: `.venv/`, `__pycache__/`, `*.egg-info/`, `.env`, `.pytest_ca
 
 1. Define `_TABLE_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")` for SQL identifier validation.
 2. Define `EmbeddingProviderConfig(BaseModel)` with all fields from SPEC §6.1:
-   - `type: Literal["openai", "huggingface", "ollama", "openai_compatible", "openrouter"]`
+   - `type: Literal["openai", "ollama", "openai_compatible", "openrouter"]`
    - `model: str`
    - `api_key: SecretStr | None = None`
    - `base_url: str | None = None`
-   - `device: str = "cpu"`
    - OpenRouter routing fields: `provider_order`, `provider_allow_fallbacks`, `provider_ignore`, `provider_only`, `provider_require_parameters`, `provider_data_collection`, `provider_max_price`
 3. Define `Settings(BaseSettings)` with:
    - `model_config = SettingsConfigDict(env_prefix="SEMSEARCH_", env_file=".env", extra="ignore", env_nested_delimiter="__")`
-   - `database_url`, `collection_name` (with validator), `embedding_provider` (default: HuggingFace), `chunk_size`, `chunk_overlap`, `default_k`, `recreate_collection_on_init`
+   - `database_url`, `collection_name` (with validator), `embedding_provider` (default: OpenAI with `text-embedding-3-small`), `chunk_size`, `chunk_overlap`, `default_k`, `recreate_collection_on_init`
 4. Validate `collection_name` against `_TABLE_NAME_RE`.
 
 **Critical gotcha to implement correctly:**
@@ -219,7 +219,6 @@ Ensure it includes: `.venv/`, `__pycache__/`, `*.egg-info/`, `.env`, `.pytest_ca
 
 1. Implement `build_embedder(settings: Settings) -> Embeddings`:
    - `openai` → `OpenAIEmbeddings(api_key=..., model=...)`
-   - `huggingface` → `HuggingFaceEmbeddings(model_name=..., model_kwargs={"device": ...})`
    - `ollama` → `OllamaEmbeddings(base_url=..., model=...)`
    - `openrouter` → `OpenAIEmbeddings(base_url="https://openrouter.ai/api/v1", model=..., model_kwargs={"extra_body": {"provider": {...}}})`
    - `openai_compatible` → `OpenAIEmbeddings(base_url=..., model=...)`
@@ -443,8 +442,9 @@ def settings(pg_container):
     return Settings(
         database_url=pg_container.get_connection_url(driver="psycopg"),
         embedding_provider=EmbeddingProviderConfig(
-            type="huggingface",
-            model="sentence-transformers/all-MiniLM-L6-v2",
+            type="openai",
+            model="text-embedding-3-small",
+            api_key=SecretStr("test-key-for-mocking"),
         ),
     )
 

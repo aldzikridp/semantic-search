@@ -19,9 +19,9 @@ from unittest.mock import patch, MagicMock
 class TestProviderSwap:
     def test_provider_swap(self, settings):  # I-14
         """Switching providers requires only config change (after --recreate if dims differ)"""
-        # Start with HuggingFace (384 dim)
+        # Start with OpenAI (1536 dim)
         # Ingest, search
-        # Switch to OpenAI (1536 dim) - would need --recreate
+        # Switch to Ollama (768 dim) - would need --recreate
         # Verify both work with their respective dims
         pass
 
@@ -121,7 +121,7 @@ class TestCLIProviderOverride:
     def test_provider_flag_overrides_env(self):  # I-26
         """--provider flag overrides env setting"""
         # Use CliRunner with --provider openrouter
-        # Verify embedder built with openrouter, not huggingface
+        # Verify embedder built with openrouter, not openai
         pass
 ```
 

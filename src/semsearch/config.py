@@ -28,18 +28,16 @@ class EmbeddingProviderConfig(BaseModel):
         SEMSEARCH_EMBEDDING_PROVIDER__PROVIDER_ORDER='["openai","together"]'
     """
 
-    type: Literal["openai", "huggingface", "ollama", "openai_compatible", "openrouter"]
+    type: Literal["openai", "ollama", "openai_compatible", "openrouter"]
     model: str
 
     # API config — meaning depends on `type`:
     #   openai             — OpenAI's hosted API (api_key required, base_url optional)
     #   openrouter         — OpenRouter (api_key required, base_url defaults to https://openrouter.ai/api/v1)
     #   openai_compatible  — any OpenAI-compatible endpoint (base_url required, api_key optional)
-    #   huggingface        — local SentenceTransformers (api_key ignored)
     #   ollama             — local Ollama daemon (base_url optional, defaults to http://localhost:11434)
     api_key: SecretStr | None = None
     base_url: str | None = None
-    device: str = "cpu"  # huggingface only
 
     # ---- OpenRouter routing — ignored by all other types ----
     # Canonical reference: https://openrouter.ai/docs/guides/routing/provider-selection
@@ -92,8 +90,8 @@ class Settings(BaseSettings):
     # ---- Embedding provider (single, no cascade) ----
     embedding_provider: EmbeddingProviderConfig = Field(
         default=EmbeddingProviderConfig(
-            type="huggingface",
-            model="sentence-transformers/all-MiniLM-L6-v2",
+            type="openai",
+            model="text-embedding-3-small",
         ),
     )
 

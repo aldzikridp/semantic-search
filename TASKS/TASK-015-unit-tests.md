@@ -81,17 +81,6 @@ class TestBuildEmbedder:
         with pytest.raises(ProviderConfigError, match="api_key"):
             build_embedder(settings)
 
-    def test_huggingface_default(self):  # U-6
-        """HuggingFace returns HuggingFaceEmbeddings with correct model"""
-        settings = Settings(
-            embedding_provider=EmbeddingProviderConfig(
-                type="huggingface",
-                model="sentence-transformers/all-MiniLM-L6-v2",
-            )
-        )
-        embedder = build_embedder(settings)
-        assert "HuggingFace" in type(embedder).__name__
-
     def test_ollama_unreachable_raises_on_embed(self):  # U-7
         """Ollama with no server raises on first embed call"""
         settings = Settings(
@@ -156,8 +145,7 @@ class TestOpenRouterRouting:
 
 1. **U-8 is the most important test** — Verifies the `model_kwargs` vs `extra_body` distinction
 2. **Mock `OpenAIEmbeddings` for U-8** — Don't actually call the API
-3. **HuggingFace test may be slow on first run** — Model download. Use `pytest.mark.slow` if needed.
-4. **Ollama test (U-7) requires no server** — Connection refused is the expected behavior
+3. **Ollama test (U-7) requires no server** — Connection refused is the expected behavior
 
 ## Verification
 

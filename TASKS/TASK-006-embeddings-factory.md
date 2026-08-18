@@ -1,12 +1,14 @@
 # TASK-006: Embeddings Factory
 
-> **Phase**: 6 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 6 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-002 (config, errors)
 > **Blocks**: TASK-007, TASK-008
 
 ## Objective
 
 Implement the provider-dispatch factory that creates LangChain `Embeddings` instances based on configuration, including OpenRouter routing translation.
+
+**Note**: HuggingFace local embeddings removed — rely entirely on API providers.
 
 ## File to Create
 
@@ -21,7 +23,6 @@ Dispatch based on `settings.embedding_provider.type`:
 | Type | Class | Required Config | Notes |
 |------|-------|-----------------|-------|
 | `openai` | `OpenAIEmbeddings` | `api_key` | Standard OpenAI API |
-| `huggingface` | `HuggingFaceEmbeddings` | none | Local, uses `sentence-transformers` |
 | `ollama` | `OllamaEmbeddings` | Ollama daemon running | Default base_url: `http://localhost:11434` |
 | `openrouter` | `OpenAIEmbeddings` | `api_key` | Default base_url: `https://openrouter.ai/api/v1` |
 | `openai_compatible` | `OpenAIEmbeddings` | `base_url` | Any OpenAI-compatible endpoint |
@@ -92,7 +93,6 @@ provider_body["order"] = cfg.provider_order
 
 Each provider's langchain package is imported only when needed. This means:
 - `langchain-openai` is only imported for `openai`, `openrouter`, `openai_compatible`
-- `langchain-huggingface` is only imported for `huggingface`
 - `langchain-ollama` is only imported for `ollama`
 
 If a package isn't installed, the import fails with `ImportError`.
@@ -100,7 +100,6 @@ If a package isn't installed, the import fails with `ImportError`.
 ## Verification (Unit Tests U-5 to U-9)
 
 - [ ] U-5: OpenAI without API key raises `ProviderConfigError`
-- [ ] U-6: HuggingFace returns `HuggingFaceEmbeddings` with correct model
 - [ ] U-7: Ollama with no server raises on first embed call (connection refused)
 - [ ] U-8: OpenRouter routing uses `model_kwargs["extra_body"]`, NOT direct `extra_body=` kwarg
 - [ ] U-9: OpenRouter routing fields ignored for non-openrouter types (`model_kwargs` is `{}`)

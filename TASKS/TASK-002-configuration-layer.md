@@ -36,12 +36,11 @@ _TABLE_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 #### `EmbeddingProviderConfig(BaseModel)`
 
-Fields per SPEC §6.1:
-- `type: Literal["openai", "huggingface", "ollama", "openai_compatible", "openrouter"]`
+Fields per SPEC §6.1 (HuggingFace removed — API-only providers):
+- `type: Literal["openai", "ollama", "openai_compatible", "openrouter"]`
 - `model: str`
 - `api_key: SecretStr | None = None`
 - `base_url: str | None = None`
-- `device: str = "cpu"`
 - `provider_order: list[str] | None = None`
 - `provider_allow_fallbacks: bool | None = None` — **MUST default to None, not True**
 - `provider_ignore: list[str] | None = None`
@@ -64,7 +63,7 @@ model_config = SettingsConfigDict(
 Fields:
 - `database_url: str` — default connection string
 - `collection_name: str` — default `"semsearch_chunks"`, validated by `_TABLE_NAME_RE`
-- `embedding_provider: EmbeddingProviderConfig` — default: HuggingFace with `all-MiniLM-L6-v2`
+- `embedding_provider: EmbeddingProviderConfig` — default: OpenAI with `text-embedding-3-small`
 - `chunk_size: int = 1000`
 - `chunk_overlap: int = 200`
 - `default_k: int = 5`

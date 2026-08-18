@@ -49,7 +49,7 @@ semsearch delete --filter '{"source": "./data/handbook.pdf"}'
 ## Configuration
 
 See `.env.example` for all options. Key settings:
-- `SEMSEARCH_EMBEDDING_PROVIDER__TYPE` — Provider: openai, huggingface, ollama, openrouter, openai_compatible
+- `SEMSEARCH_EMBEDDING_PROVIDER__TYPE` — Provider: openai, ollama, openrouter, openai_compatible
 - `SEMSEARCH_DATABASE_URL` — PostgreSQL connection string
 
 ## CLI Commands

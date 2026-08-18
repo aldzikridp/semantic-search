@@ -62,11 +62,10 @@ classifiers = [
 # remains installable alongside other tooling; the exact pins live in
 # requirements.txt for reproducible deployments.
 #
-# Embedding-provider packages (langchain-openai / -huggingface / -ollama) are
-# NOT in the core list — they are loaded lazily based on
-# SEMSEARCH_EMBEDDING_PROVIDER__TYPE (spec §2: "Loaded lazily based on
-# EMBEDDING_PROVIDER_TYPE"). They live in the optional extras below so users
-# only install the provider they actually use.
+# Embedding-provider packages (langchain-openai / -ollama) are NOT in the core
+# list — they are loaded lazily based on SEMSEARCH_EMBEDDING_PROVIDER__TYPE.
+# They live in the optional extras below so users only install the provider
+# they actually use.
 # ----------------------------------------------------------------------------
 dependencies = [
     "langchain>=0.2.16",
@@ -90,29 +89,21 @@ dependencies = [
 # ----------------------------------------------------------------------------
 # Provider extras — install exactly the one you plan to use:
 #   pip install -e ".[openai]"
-#   pip install -e ".[huggingface]"
 #   pip install -e ".[ollama]"
-#   pip install -e ".[all]"           # all three providers
+#   pip install -e ".[all]"           # openai + ollama
 #
-# `langchain-openai` covers three provider types per spec §2: openai,
-# openai_compatible, and openrouter — all three go through OpenAI's SDK
-# against different base_urls.
+# `langchain-openai` covers three provider types: openai, openai_compatible,
+# and openrouter — all three go through OpenAI's SDK against different base_urls.
 # ----------------------------------------------------------------------------
 [project.optional-dependencies]
 openai = [
     "langchain-openai>=0.1.22",            # openai, openai_compatible, openrouter
-]
-huggingface = [
-    "langchain-huggingface>=0.0.3",
-    "sentence-transformers>=3.0.1",        # runtime dep of langchain-huggingface
 ]
 ollama = [
     "langchain-ollama>=0.1.0",
 ]
 all = [
     "langchain-openai>=0.1.22",
-    "langchain-huggingface>=0.0.3",
-    "sentence-transformers>=3.0.1",
     "langchain-ollama>=0.1.0",
 ]
 
@@ -132,6 +123,7 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
 ]
+
 
 # Entry point: `semsearch` command → typer app object (spec §8).
 # Typer's Typer object is itself a valid console-script target.
@@ -246,7 +238,6 @@ module = [
     "langchain_postgres.*",
     "langchain_text_splitters.*",
     "langchain_openai.*",
-    "langchain_huggingface.*",
     "langchain_ollama.*",
     "psycopg.*",
     "pgvector.*",

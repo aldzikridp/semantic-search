@@ -3,13 +3,17 @@
 > **Plan**: [PLAN.md](PLAN.md) | **Spec**: [SPEC.md](SPEC.md)
 > **Tasks Directory**: [TASKS/](TASKS/)
 
+## Design Decisions
+
+- **No local embeddings** — HuggingFace local embeddings removed; rely entirely on API providers (OpenAI, OpenRouter, OpenAI-compatible, Ollama).
+
 ## Status Overview
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 5 |
+| ✅ Done | 6 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 18 |
+| ⏳ Not Started | 17 |
 
 ---
 
@@ -35,7 +39,7 @@
 ### Phase 6-7: Embeddings & Database
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-006](TASKS/TASK-006-embeddings-factory.md) | Embeddings Factory (embeddings.py) | ⏳ | 002 | 007-008 |
+| [TASK-006](TASKS/TASK-006-embeddings-factory.md) | Embeddings Factory (embeddings.py) | ✅ | 002 | 007-008 |
 | [TASK-007](TASKS/TASK-007-database-store.md) | Database Store (store.py) | ⏳ | 002, 001 | 008 |
 
 ### Phase 8: Core Service (Split into Sub-tasks)

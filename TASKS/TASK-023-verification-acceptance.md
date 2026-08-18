@@ -50,13 +50,13 @@ semsearch stats
 ### 4. Provider Swap Test
 
 ```bash
-# With HuggingFace (default)
+# With OpenAI (default)
 semsearch init --recreate --yes
 semsearch ingest ./tests/fixtures/sample.txt
 semsearch search "test" --k 3
 
-# Switch to OpenAI (requires API key)
-# Edit .env: SEMSEARCH_EMBEDDING_PROVIDER__TYPE=openai
+# Switch to Ollama
+# Edit .env: SEMSEARCH_EMBEDDING_PROVIDER__TYPE=ollama
 semsearch init --recreate --yes
 semsearch ingest ./tests/fixtures/sample.txt
 semsearch search "test" --k 3

@@ -19,9 +19,7 @@ jq==1.7.0
 
 # Providers (install only the ones you need, or use pyproject.toml extras)
 langchain-openai==0.1.22
-langchain-huggingface==0.0.3
 langchain-ollama==0.1.0
-sentence-transformers==3.0.1
 
 # Test
 pytest==8.3.2

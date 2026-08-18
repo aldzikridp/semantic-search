@@ -129,7 +129,7 @@ It uses `CREATE TABLE`, not `CREATE TABLE IF NOT EXISTS`. The idempotency check 
 
 3. **`UNIQUE (source, chunk_index)`** — Enforced at DB level. Prevents duplicate chunks.
 
-4. **Vector dimension must match provider** — OpenAI `text-embedding-3-small` = 1536, HuggingFace `all-MiniLM-L6-v2` = 384, etc.
+4. **Vector dimension must match provider** — OpenAI `text-embedding-3-small` = 1536, Ollama `nomic-embed-text` = 768, etc.
 
 5. **`PGEngine.close()` is async** — For sync API, use `asyncio.run_coroutine_threadsafe(...).result()` or similar.
 

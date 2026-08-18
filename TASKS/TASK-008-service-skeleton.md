@@ -62,8 +62,8 @@ class SemanticSearchService:
 def init_schema(self, *, recreate: bool = False) -> None:
     """Idempotently create the chunks table with the active provider's vector dim."""
     # Get vector size from embedder
-    # For HuggingFace: len(embedder.embed_query("test"))
     # For OpenAI: known from model name
+    # For Ollama: depends on model
     vector_size = self._get_vector_size()
     init_schema(self.settings, self.engine, vector_size, recreate=recreate)
 ```
@@ -119,7 +119,7 @@ with self.engine.begin() as conn:
    # OR: just call asyncio.run(self.engine._async_engine.dispose())
    ```
 
-3. **`_get_vector_size()` embeds a dummy query** — This is a one-time cost on service initialization. For HuggingFace, it loads the model (may take a few seconds on first call).
+3. **`_get_vector_size()` embeds a dummy query** — This is a one-time cost on service initialization.
 
 4. **Table name from settings** — Always use `self.settings.collection_name`, never hardcode.
 
