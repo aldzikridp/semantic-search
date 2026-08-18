@@ -1,6 +1,6 @@
 # TASK-014: CLI Implementation
 
-> **Phase**: 9 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 9 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-008, TASK-009, TASK-010, TASK-011, TASK-012, TASK-013
 > **Blocks**: TASK-021
 

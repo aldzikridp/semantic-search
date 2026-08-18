@@ -1,6 +1,6 @@
 # TASK-016: Integration Tests — Ingest
 
-> **Phase**: 10.3 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 10.3 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-008, TASK-009
 > **Blocks**: TASK-022
 

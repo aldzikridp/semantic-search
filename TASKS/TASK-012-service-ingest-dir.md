@@ -1,6 +1,6 @@
 # TASK-012: Core Service — Ingest Dir Method
 
-> **Phase**: 8.6 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 8.6 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-009, TASK-011
 > **Blocks**: TASK-014, TASK-019
 

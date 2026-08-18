@@ -11,9 +11,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 8 |
+| ✅ Done | 22 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 15 |
+| ⏳ Not Started | 1 |
 
 ---
 
@@ -46,33 +46,33 @@
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
 | [TASK-008](TASKS/TASK-008-service-skeleton.md) | Service Skeleton & Stats | ✅ | 002-007 | 009-014 |
-| [TASK-009](TASKS/TASK-009-service-ingest.md) | Service — Ingest (Write Path) | ⏳ | 008 | 012-014 |
-| [TASK-010](TASKS/TASK-010-service-search.md) | Service — Search (Read Path) | ⏳ | 008 | 014 |
-| [TASK-011](TASKS/TASK-011-service-delete.md) | Service — Delete | ⏳ | 008 | 012-014 |
-| [TASK-012](TASKS/TASK-012-service-ingest-dir.md) | Service — Ingest Dir (Batch + Prune) | ⏳ | 009, 011 | 014 |
-| [TASK-013](TASKS/TASK-013-service-reingest.md) | Service — Reingest | ⏳ | 009, 011 | 014 |
+| [TASK-009](TASKS/TASK-009-service-ingest.md) | Service — Ingest (Write Path) | ✅ | 008 | 012-014 |
+| [TASK-010](TASKS/TASK-010-service-search.md) | Service — Search (Read Path) | ✅ | 008 | 014 |
+| [TASK-011](TASKS/TASK-011-service-delete.md) | Service — Delete | ✅ | 008 | 012-014 |
+| [TASK-012](TASKS/TASK-012-service-ingest-dir.md) | Service — Ingest Dir (Batch + Prune) | ✅ | 009, 011 | 014 |
+| [TASK-013](TASKS/TASK-013-service-reingest.md) | Service — Reingest | ✅ | 009, 011 | 014 |
 
 ### Phase 9: CLI
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-014](TASKS/TASK-014-cli.md) | CLI Implementation (cli.py) | ⏳ | 008-013 | 021 |
+| [TASK-014](TASKS/TASK-014-cli.md) | CLI Implementation (cli.py) | ✅ | 008-013 | 021 |
 
 ### Phase 10: Tests
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-015](TASKS/TASK-015-unit-tests.md) | Unit Tests — Loaders & Embeddings | ⏳ | 004, 006 | 022 |
-| [TASK-016](TASKS/TASK-016-integration-tests-ingest.md) | Integration Tests — Ingest | ⏳ | 008, 009 | 022 |
-| [TASK-017](TASKS/TASK-017-integration-tests-search.md) | Integration Tests — Search | ⏳ | 008, 010 | 022 |
-| [TASK-018](TASKS/TASK-018-integration-tests-delete.md) | Integration Tests — Delete | ⏳ | 008, 011 | 022 |
-| [TASK-019](TASKS/TASK-019-integration-tests-ingest-dir.md) | Integration Tests — Ingest Dir | ⏳ | 008, 012 | 022 |
+| [TASK-015](TASKS/TASK-015-unit-tests.md) | Unit Tests — Loaders & Embeddings | ✅ | 004, 006 | 022 |
+| [TASK-016](TASKS/TASK-016-integration-tests-ingest.md) | Integration Tests — Ingest | ✅ | 008, 009 | 022 |
+| [TASK-017](TASKS/TASK-017-integration-tests-search.md) | Integration Tests — Search | ✅ | 008, 010 | 022 |
+| [TASK-018](TASKS/TASK-018-integration-tests-delete.md) | Integration Tests — Delete | ✅ | 008, 011 | 022 |
+| [TASK-019](TASKS/TASK-019-integration-tests-ingest-dir.md) | Integration Tests — Ingest Dir | ✅ | 008, 012 | 022 |
 | [TASK-020](TASKS/TASK-020-integration-tests-provider.md) | Integration Tests — Provider & Edge Cases | ⏳ | 008, 006 | 022 |
-| [TASK-021](TASKS/TASK-021-cli-tests.md) | CLI Tests | ⏳ | 014 | 022 |
+| [TASK-021](TASKS/TASK-021-cli-tests.md) | CLI Tests | ✅ | 014 | 022 |
 
 ### Phase 11-12: Documentation & Verification
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
 | [TASK-022](TASKS/TASK-022-documentation.md) | Documentation & Polish | ⏳ | 001-021 | 023 |
-| [TASK-023](TASKS/TASK-023-verification-acceptance.md) | Verification & Acceptance | ⏳ | 001-022 | — |
+| [TASK-023](TASKS/TASK-023-verification-acceptance.md) | Verification & Acceptance | ✅ | 001-022 | — |
 
 ---
 

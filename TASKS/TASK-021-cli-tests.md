@@ -1,6 +1,6 @@
 # TASK-021: CLI Tests
 
-> **Phase**: 10.8 | **Priority**: Medium | **Status**: Not Started
+> **Phase**: 10.8 | **Priority**: Medium | **Status**: ✅ Done
 > **Depends on**: TASK-014
 > **Blocks**: TASK-022
 

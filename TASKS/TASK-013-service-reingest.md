@@ -1,6 +1,6 @@
 # TASK-013: Core Service — Reingest Method
 
-> **Phase**: 8.7 | **Priority**: High | **Status**: Not Started
+> **Phase**: 8.7 | **Priority**: High | **Status**: ✅ Done
 > **Depends on**: TASK-009, TASK-011
 > **Blocks**: TASK-014
 

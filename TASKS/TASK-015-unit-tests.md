@@ -1,6 +1,6 @@
 # TASK-015: Unit Tests — Loaders & Embeddings
 
-> **Phase**: 10.1-10.2 | **Priority**: High | **Status**: Not Started
+> **Phase**: 10.1-10.2 | **Priority**: High | **Status**: ✅ Done
 > **Depends on**: TASK-004, TASK-006
 > **Blocks**: TASK-022
 

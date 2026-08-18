@@ -1,6 +1,6 @@
 # TASK-019: Integration Tests — Ingest Dir
 
-> **Phase**: 10.6 | **Priority**: High | **Status**: Not Started
+> **Phase**: 10.6 | **Priority**: High | **Status**: ✅ Done
 > **Depends on**: TASK-008, TASK-012
 > **Blocks**: TASK-022
 
