@@ -11,9 +11,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 22 |
+| ✅ Done | 23 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 1 |
+| ⏳ Not Started | 0 |
 
 ---
 
@@ -65,7 +65,7 @@
 | [TASK-017](TASKS/TASK-017-integration-tests-search.md) | Integration Tests — Search | ✅ | 008, 010 | 022 |
 | [TASK-018](TASKS/TASK-018-integration-tests-delete.md) | Integration Tests — Delete | ✅ | 008, 011 | 022 |
 | [TASK-019](TASKS/TASK-019-integration-tests-ingest-dir.md) | Integration Tests — Ingest Dir | ✅ | 008, 012 | 022 |
-| [TASK-020](TASKS/TASK-020-integration-tests-provider.md) | Integration Tests — Provider & Edge Cases | ⏳ | 008, 006 | 022 |
+| [TASK-020](TASKS/TASK-020-integration-tests-provider.md) | Integration Tests — Provider & Edge Cases | ✅ | 008, 006 | 022 |
 | [TASK-021](TASKS/TASK-021-cli-tests.md) | CLI Tests | ✅ | 014 | 022 |
 
 ### Phase 11-12: Documentation & Verification
