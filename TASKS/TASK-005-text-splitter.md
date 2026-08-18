@@ -1,6 +1,6 @@
 # TASK-005: Text Splitter
 
-> **Phase**: 5 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 5 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-001 (langchain-text-splitters)
 > **Blocks**: TASK-008
 

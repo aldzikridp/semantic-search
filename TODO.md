@@ -7,9 +7,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 4 |
+| ✅ Done | 5 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 19 |
+| ⏳ Not Started | 18 |
 
 ---
 
@@ -30,7 +30,7 @@
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
 | [TASK-004](TASKS/TASK-004-document-loaders.md) | Document Loaders (loaders.py) | ✅ | 001 | 008 |
-| [TASK-005](TASKS/TASK-005-text-splitter.md) | Text Splitter (splitter.py) | ⏳ | 001 | 008 |
+| [TASK-005](TASKS/TASK-005-text-splitter.md) | Text Splitter (splitter.py) | ✅ | 001 | 008 |
 
 ### Phase 6-7: Embeddings & Database
 | # | Task | Status | Depends On | Blocks |
