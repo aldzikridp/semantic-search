@@ -233,3 +233,41 @@ SEMSEARCH_EMBEDDING_PROVIDER__TYPE=openrouter
 SEMSEARCH_EMBEDDING_PROVIDER__MODEL=openai/text-embedding-3-small
 SEMSEARCH_EMBEDDING_PROVIDER__PROVIDER_MAX_PRICE={"prompt":0.05}
 ```
+
+## Reranker
+
+Reranking improves search precision by re-scoring results with a cross-encoder model. The reranker uses a generic HTTP API compatible with OpenRouter, Jina, and other providers.
+
+### Configuration
+
+```bash
+# OpenRouter (reuse existing API key)
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+
+# Jina (separate API key, free tier: 1M tokens/month)
+SEMSEARCH_RERANKER__BASE_URL=https://api.jina.ai/v1/rerank
+SEMSEARCH_RERANKER__MODEL=jina-reranker-v2-base-multilingual
+SEMSEARCH_RERANKER__API_KEY=jina_...
+```
+
+### Available Models
+
+| Provider | Model | Quality | Price |
+|----------|-------|---------|-------|
+| OpenRouter | `cohere/rerank-v3.5` | Excellent | Pay-per-use |
+| OpenRouter | `cohere/rerank-english-v3.0` | Good | Pay-per-use |
+| Jina | `jina-reranker-v2-base-multilingual` | Good | 1M tokens/month free |
+
+### Usage
+
+```bash
+semsearch search "query" --rerank --k 5
+```
+
+### How it works
+
+1. Vector search retrieves `k * 4` candidates
+2. Reranker re-scores candidates against the query
+3. Top-k results returned with `rerank_score` in metadata
+4. File names and metadata are preserved

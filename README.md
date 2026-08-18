@@ -167,6 +167,7 @@ semsearch search "how to deploy"
 semsearch search "api docs" --k 10
 semsearch search "pdf content" --filter '{"doc_type": "pdf"}'
 semsearch search "old docs" --filter '{"source": {"$ilike": "docs/old/%"}}'
+semsearch search "database setup" --rerank --k 5  # With reranking
 ```
 
 **Filter operators:**
@@ -263,6 +264,39 @@ Re-ingesting an unchanged file makes **zero embedding API calls**. The service c
 | `openrouter` | OpenAIEmbeddings | Yes | — |
 | `openai_compatible` | OpenAIEmbeddings | No | — |
 | `ollama` | OllamaEmbeddings | No | — |
+
+## Reranker (Optional)
+
+Reranking improves search precision by re-scoring results with a cross-encoder.
+
+### Configuration
+
+```bash
+# OpenRouter (reuse existing API key)
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+
+# Jina (separate API key)
+SEMSEARCH_RERANKER__BASE_URL=https://api.jina.ai/v1/rerank
+SEMSEARCH_RERANKER__MODEL=jina-reranker-v2-base-multilingual
+SEMSEARCH_RERANKER__API_KEY=jina_...
+```
+
+### Usage
+
+```bash
+# Search with reranking
+semsearch search "database setup" --rerank --k 5
+
+# Search without reranking (default)
+semsearch search "database setup" --k 5
+```
+
+### How it works
+
+1. Vector search retrieves `k * 4` candidates
+2. Reranker re-scores candidates against the query
+3. Top-k results returned with `rerank_score` in metadata
 
 **OpenRouter routing** (optional):
 

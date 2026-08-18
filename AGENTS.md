@@ -47,11 +47,12 @@ If you encounter `ImportError` for `.so` files, add the missing Nix package to `
 src/semsearch/
 ├── __init__.py       # Package marker + __version__
 ├── cli.py            # Typer CLI entry point (8 commands)
-├── config.py         # Pydantic Settings + EmbeddingProviderConfig
+├── config.py         # Pydantic Settings + EmbeddingProviderConfig + RerankerProviderConfig
 ├── embeddings.py     # Provider-dispatch factory (openai, ollama, openrouter, openai_compatible)
 ├── errors.py         # Exception hierarchy (SemSearchError base)
 ├── loaders.py        # File-type dispatch (pick_loader) + metadata injection (with_doc_type)
 ├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
+├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint)
 ├── service.py        # SemanticSearchService — main orchestration layer
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
 └── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg)
@@ -185,6 +186,21 @@ HNSW index only supports vectors ≤2000 dimensions. Skip index creation for lar
 if vector_size <= 2000:
     cur.execute("CREATE INDEX ... USING hnsw ...")
 ```
+
+### 13. Reranker (optional)
+
+Reranking improves search precision by re-scoring results with a cross-encoder. Uses generic HTTP API (OpenRouter, Jina, etc.).
+
+```bash
+# Config
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+
+# Usage
+semsearch search "query" --rerank --k 5
+```
+
+**Flow:** Vector search (k*4 candidates) → Reranker → Top-k results with `rerank_score` in metadata.
 
 ---
 

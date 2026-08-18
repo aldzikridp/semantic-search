@@ -167,7 +167,7 @@ semsearch ingest-dir docs/ --no-continue-on-error
 Cosine similarity search.
 
 ```bash
-semsearch search <query> [--k N] [--filter JSON]
+semsearch search <query> [--k N] [--filter JSON] [--rerank]
 ```
 
 | Argument/Option | Description |
@@ -187,6 +187,9 @@ semsearch search "api docs" --k 10
 
 # Filter by doc_type
 semsearch search "pdf content" --filter '{"doc_type": "pdf"}'
+
+# With reranking
+semsearch search "database setup" --rerank --k 5
 
 # Filter by source prefix
 semsearch search "old docs" --filter '{"source": {"$ilike": "docs/old/%"}}'

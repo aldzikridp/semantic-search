@@ -193,3 +193,40 @@ The table was created with a different schema. Recreate:
 ```bash
 semsearch init --recreate --yes
 ```
+
+## Reranker
+
+Reranking improves search precision by re-scoring results with a cross-encoder model.
+
+### Configuration
+
+```bash
+# OpenRouter (reuse existing API key)
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+
+# Jina (separate API key)
+SEMSEARCH_RERANKER__BASE_URL=https://api.jina.ai/v1/rerank
+SEMSEARCH_RERANKER__MODEL=jina-reranker-v2-base-multilingual
+SEMSEARCH_RERANKER__API_KEY=jina_...
+```
+
+### Reranker Fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `base_url` | `https://openrouter.ai/api/v1/rerank` | API endpoint |
+| `model` | `cohere/rerank-v3.5` | Model name |
+| `api_key` | None (falls back to embedding provider key) | API key |
+| `top_n` | `5` | Default top_n for reranking |
+
+### Reranker Troubleshooting
+
+### "Reranker not configured"
+
+Set the reranker configuration:
+
+```bash
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+```
