@@ -118,16 +118,18 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     k: int = typer.Option(5, help="Top-k results"),
     filter: Optional[str] = typer.Option(None, help="PGVectorStore filter dict (JSON)"),
+    rerank: bool = typer.Option(False, "--rerank", help="Rerank results using configured reranker"),
 ) -> None:
     """Run a similarity search."""
     settings = Settings()
     filter_dict = json.loads(filter) if filter else None
     with SemanticSearchService.from_settings(settings) as svc:
-        results = svc.search(query, k=k, filter=filter_dict)
+        results = svc.search(query, k=k, filter=filter_dict, rerank=rerank)
         output = {
             "query": query,
             "k": k,
             "filter": filter_dict,
+            "reranked": rerank,
             "results": [r.model_dump() for r in results],
         }
         typer.echo(json.dumps(output, indent=2, default=str))

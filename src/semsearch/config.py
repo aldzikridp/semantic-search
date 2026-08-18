@@ -55,6 +55,22 @@ class EmbeddingProviderConfig(BaseModel):
     # For embeddings, only "prompt" is meaningful
 
 
+class RerankerProviderConfig(BaseModel):
+    """Generic reranker configuration.
+
+    Works with any OpenAI-compatible reranker endpoint (OpenRouter, Jina, Cohere, etc.).
+
+    Env var mapping:
+        SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+        SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+    """
+
+    base_url: str = "https://openrouter.ai/api/v1/rerank"
+    model: str = "cohere/rerank-v3.5"
+    api_key: SecretStr | None = None  # Falls back to embedding provider key
+    top_n: int = 5
+
+
 class Settings(BaseSettings):
     """Top-level settings loaded from environment variables / .env file.
 
@@ -104,3 +120,6 @@ class Settings(BaseSettings):
 
     # ---- Lifecycle ----
     recreate_collection_on_init: bool = False  # safety: must be opt-in
+
+    # ---- Reranker (optional) ----
+    reranker: RerankerProviderConfig | None = None

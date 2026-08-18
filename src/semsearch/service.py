@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+from langchain_core.documents import Document
 
 from semsearch.config import Settings
 from semsearch.embeddings import build_embedder
 from semsearch.errors import DeleteError, FileIngestError, SearchError
+from semsearch.reranker import Reranker, build_reranker
 from semsearch.loaders import pick_loader, with_doc_type
 from semsearch.models import (
     BatchAggregate,
@@ -56,6 +58,7 @@ class SemanticSearchService:
         self.engine = engine
         self.embedder = embedder
         self._store = store
+        self._reranker: Reranker | None = None
         # Normalize URL for raw psycopg connections
         db_url = settings.database_url
         if db_url.startswith("postgres://"):
@@ -435,27 +438,53 @@ class SemanticSearchService:
 
     # ---- Search ----
 
+    @property
+    def reranker(self) -> Reranker | None:
+        """Lazy-init reranker (only created if configured)."""
+        if self._reranker is None and self.settings.reranker is not None:
+            self._reranker = build_reranker(self.settings)
+        return self._reranker
+
     def search(
         self,
         query: str,
         k: int | None = None,
         filter: dict | None = None,
+        rerank: bool = False,
     ) -> list[SearchResult]:
-        """Cosine similarity search over the chunks table."""
+        """Cosine similarity search over the chunks table.
+
+        Args:
+            query: Free-text query.
+            k: Top-k results. Defaults to settings.default_k. Must be 1-50.
+            filter: Optional PGVectorStore filter dict.
+            rerank: If True, rerank results using configured reranker.
+
+        Returns:
+            List of SearchResult sorted by score DESC (or rerank_score DESC).
+
+        Raises:
+            ValueError: k out of range.
+            SearchError: Search or rerank failed.
+        """
         if k is None:
             k = self.settings.default_k
         if not (1 <= k <= 50):
             raise ValueError(f"k must be between 1 and 50, got {k}")
 
+        # When reranking, fetch more candidates for better reranking quality
+        fetch_k = k * 4 if rerank else k
+
         try:
             results_with_scores = self.store.similarity_search_with_score(
                 query,
-                k=k,
+                k=fetch_k,
                 filter=filter,
             )
         except Exception as e:
             raise SearchError(f"Search failed: {e}") from e
 
+        # Convert to SearchResult
         results = []
         for doc, distance in results_with_scores:
             score = 1.0 - distance
@@ -473,7 +502,33 @@ class SemanticSearchService:
                 )
             )
 
-        return results
+        # Rerank if requested
+        if rerank:
+            reranker = self.reranker
+            if reranker is None:
+                raise SearchError(
+                    "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL "
+                    "and SEMSEARCH_RERANKER__MODEL in .env"
+                )
+            # Extract documents from results for reranking
+            docs = []
+            for r in results:
+                doc = Document(
+                    page_content=r.content,
+                    metadata={**r.metadata, "_search_result": r},
+                )
+                docs.append(doc)
+
+            reranked_docs = reranker.rerank(query, docs, top_n=k)
+
+            # Build new results from reranked docs
+            results = []
+            for doc in reranked_docs:
+                sr = doc.metadata.pop("_search_result")
+                sr.metadata["rerank_score"] = doc.metadata.get("rerank_score")
+                results.append(sr)
+
+        return results[:k]
 
     # ---- Stats ----
 
