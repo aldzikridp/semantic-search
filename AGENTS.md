@@ -46,32 +46,37 @@ If you encounter `ImportError` for `.so` files, add the missing Nix package to `
 ```
 src/semsearch/
 ├── __init__.py       # Package marker + __version__
-├── cli.py            # Typer CLI entry point
+├── cli.py            # Typer CLI entry point (8 commands)
 ├── config.py         # Pydantic Settings + EmbeddingProviderConfig
 ├── embeddings.py     # Provider-dispatch factory (openai, ollama, openrouter, openai_compatible)
 ├── errors.py         # Exception hierarchy (SemSearchError base)
 ├── loaders.py        # File-type dispatch (pick_loader) + metadata injection (with_doc_type)
-├── models.py         # Pydantic models (SearchResult, IngestResult, etc.)
+├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
+├── service.py        # SemanticSearchService — main orchestration layer
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
-└── store.py          # PGEngine/PGVectorStore construction + schema init
-```
-
-### Planned (not yet implemented)
-
-```
-src/semsearch/
-└── service.py        # SemanticSearchService — main orchestration layer (TASK-008+)
+└── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg)
 
 tests/
-├── conftest.py       # Shared fixtures (PGVectorStore container, service)
-├── test_loaders.py
-├── test_embeddings.py
-├── test_service_ingest.py
-├── test_service_search.py
-├── test_service_delete.py
-├── test_service_ingest_dir.py
-├── test_service_provider.py
-└── test_cli.py
+├── conftest.py       # Shared fixtures (MockEmbeddings, service, pg_url)
+├── test_loaders.py   # Loader unit tests (7 tests)
+├── test_embeddings.py # Embeddings factory tests (6 tests)
+├── test_service_ingest.py    # Ingest integration tests (9 tests)
+├── test_service_search.py    # Search integration tests (5 tests)
+├── test_service_delete.py    # Delete integration tests (3 tests)
+├── test_service_ingest_dir.py # Directory ingest tests (11 tests)
+├── test_service_provider.py  # Provider routing tests (13 tests)
+└── test_cli.py       # CLI tests (4 tests)
+
+docs/
+├── index.md          # Documentation index
+├── getting-started.md # Installation, first search
+├── configuration.md  # Environment variables
+├── cli-reference.md  # All commands with examples
+├── architecture.md   # Code structure, design decisions
+├── api-reference.md  # Python API reference
+├── database.md       # Schema, indexes, maintenance
+├── providers.md      # Embedding provider details
+└── development.md    # Testing, contributing
 ```
 
 ---
@@ -82,7 +87,18 @@ These are non-negotiable. Violating them will cause spec non-compliance.
 
 ### 1. Write path is service-owned SQL
 
-**NEVER** use `PGVectorStore.add_documents()`. All writes go through `engine.begin()` + parameterized SQLAlchemy statements. This is for atomicity and precomputed embeddings.
+**NEVER** use `PGVectorStore.add_documents()`. All writes go through raw `psycopg` connections with parameterized SQL. This is for atomicity and precomputed embeddings.
+
+```python
+# CORRECT ✅
+conn = psycopg.connect(db_url)
+with conn.cursor() as cur:
+    cur.execute("INSERT INTO ... ON CONFLICT ... DO UPDATE ...", params)
+    conn.commit()
+
+# WRONG ❌
+store.add_documents(docs)  # Row-by-row commits, re-embeds everything
+```
 
 ### 2. PGVectorStore is read-only
 
@@ -127,6 +143,49 @@ When the user doesn't set it, the field must be absent from the dict — NOT `{"
 
 No local embeddings (HuggingFace removed). Providers: `openai`, `ollama`, `openrouter`, `openai_compatible`.
 
+### 9. Lazy store initialization
+
+`PGVectorStore.create_sync()` requires the table to exist. The store is lazily initialized via a property:
+
+```python
+@property
+def store(self) -> PGVectorStore:
+    if self._store is None:
+        self._store = build_store(self.settings, self.engine, self.embedder)
+    return self._store
+```
+
+### 10. Async close()
+
+`PGEngine.close()` is async. Use `asyncio.new_event_loop()` to run it synchronously:
+
+```python
+def close(self) -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(self.engine.close())
+    finally:
+        loop.close()
+```
+
+### 11. URL normalization
+
+Database URLs may use `postgres://` (not `postgresql://`). Normalize before use:
+
+```python
+if url.startswith("postgres://"):
+    url = url.replace("postgres://", "postgresql://", 1)
+```
+
+### 12. HNSW dimension limit
+
+HNSW index only supports vectors ≤2000 dimensions. Skip index creation for larger vectors:
+
+```python
+if vector_size <= 2000:
+    cur.execute("CREATE INDEX ... USING hnsw ...")
+```
+
 ---
 
 ## Provider Configuration
@@ -138,6 +197,8 @@ No local embeddings (HuggingFace removed). Providers: `openai`, `ollama`, `openr
 | `openrouter` | `OpenAIEmbeddings` | `api_key` | `https://openrouter.ai/api/v1` |
 | `openai_compatible` | `OpenAIEmbeddings` | `base_url` | `http://localhost:1234/v1` |
 
+**Important**: For OpenRouter, use `check_embedding_ctx_length=False` in `OpenAIEmbeddings` to avoid context length validation errors.
+
 ---
 
 ## Database Schema
@@ -145,9 +206,9 @@ No local embeddings (HuggingFace removed). Providers: `openai`, `ollama`, `openr
 ```sql
 CREATE TABLE semsearch_chunks (
     langchain_id        TEXT PRIMARY KEY,
-    embedding           vector(1536),          -- dim depends on provider
+    embedding           vector(N),             -- N = provider dimension
     content             TEXT,
-    langchain_metadata  JSONB,
+    langchain_metadata  JSONB,                 -- stored as JSON, cast to jsonb for GIN index
     source              TEXT NOT NULL,
     chunk_index         INTEGER NOT NULL,
     document_hash       CHAR(64),
@@ -155,10 +216,15 @@ CREATE TABLE semsearch_chunks (
 );
 
 -- Indexes (created separately, NOT by init_vectorstore_table)
+-- HNSW only for vectors ≤2000 dim
 CREATE INDEX {table}_hnsw_idx ON {table} USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX {table}_metadata_gin_idx ON {table} USING gin (langchain_metadata jsonb_path_ops);
+-- GIN index requires jsonb cast
+CREATE INDEX {table}_metadata_gin_idx ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops);
+-- Composite index for re-ingest lookups
 CREATE INDEX {table}_source_chunk_idx ON {table} (source, chunk_index);
 ```
+
+**Note**: `langchain_metadata` is stored as `json` type by langchain-postgres, but must be cast to `::jsonb` for GIN index and `jsonb_set()` operations.
 
 ---
 
@@ -202,6 +268,58 @@ nix develop --command bash -c "semsearch --help"
 nix develop --command bash -c "pytest -v --tb=short"
 ```
 
+### With test database
+
+```bash
+# Local PostgreSQL
+export PGHOST="$HOME/Project/semantic-search/.pgsocket"
+export TEST_DATABASE_URL="postgresql+psycopg://semsearch:test@/semsearch?host=$PGHOST"
+
+nix develop --command bash -c "TEST_DATABASE_URL='$TEST_DATABASE_URL' pytest -v"
+```
+
+---
+
+## Testing
+
+### Test Structure
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| `test_loaders.py` | 7 | Loader dispatch, metadata injection |
+| `test_embeddings.py` | 6 | Provider factory, OpenRouter routing |
+| `test_service_ingest.py` | 9 | CASE A/B/C/D, idempotency |
+| `test_service_search.py` | 5 | Search, filters, score range |
+| `test_service_delete.py` | 3 | Delete by source, empty filter |
+| `test_service_ingest_dir.py` | 11 | File discovery, prune, error handling |
+| `test_service_provider.py` | 13 | OpenRouter routing, error propagation |
+| `test_cli.py` | 4 | CLI commands, help text |
+
+**Total: 58 tests**
+
+### MockEmbeddings
+
+For tests that don't need real embeddings:
+
+```python
+from tests.conftest import MockEmbeddings
+
+embeddings = MockEmbeddings(dim=128)
+result = embeddings.embed_query("test")  # Deterministic hash-based
+```
+
+### Testcontainers
+
+Integration tests use testcontainers for PostgreSQL:
+
+```python
+@pytest.fixture(scope="session")
+def pg_container():
+    from testcontainers.community.postgres import PostgresContainer
+    with PostgresContainer("pgvector/pgvector:pg16") as pg:
+        yield pg
+```
+
 ---
 
 ## Dependencies
@@ -228,7 +346,7 @@ nix develop --command bash -c "pytest -v --tb=short"
 
 See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TASK-XXX-*.md`.
 
-**Status as of last update**: 7/23 tasks complete (Phase 1-7 done)
+**Status**: 23/23 tasks complete ✅
 
 | Phase | Task | Status |
 |-------|------|--------|
@@ -239,9 +357,22 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 | 5 | Text Splitter | ✅ |
 | 6 | Embeddings Factory | ✅ |
 | 7 | Database Store | ✅ |
-| 8 | Core Service | ⏳ Next |
-| 9 | CLI | ⏳ |
-| 10 | Tests | ⏳ |
+| 8.1-2 | Service Skeleton & Stats | ✅ |
+| 8.3 | Service Ingest | ✅ |
+| 8.4 | Service Search | ✅ |
+| 8.5 | Service Delete | ✅ |
+| 8.6 | Service Ingest Dir | ✅ |
+| 8.7 | Service Reingest | ✅ |
+| 9 | CLI | ✅ |
+| 10.1-2 | Unit Tests | ✅ |
+| 10.3 | Integration Tests — Ingest | ✅ |
+| 10.4 | Integration Tests — Search | ✅ |
+| 10.5 | Integration Tests — Delete | ✅ |
+| 10.6 | Integration Tests — Ingest Dir | ✅ |
+| 10.7 | Integration Tests — Provider | ✅ |
+| 10.8 | CLI Tests | ✅ |
+| 11 | Documentation | ✅ |
+| 12 | Verification | ✅ |
 
 ---
 
@@ -249,9 +380,15 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 
 1. **`init_vectorstore_table` is NOT idempotent** — Check `information_schema.tables` first
 2. **`Column` has no `primary_key` param** — Just use `Column("langchain_id", "TEXT")`
-3. **`PGEngine.close()` is async** — Use `asyncio.run()` for sync cleanup
+3. **`PGEngine.close()` is async** — Use `asyncio.new_event_loop()` for sync cleanup
 4. **`collection_name` becomes a table name** — Validated against `/^[a-z_][a-z0-9_]{0,62}$/`
 5. **NixOS requires `nix develop`** — Don't run Python directly outside the shell
+6. **`postgres://` URLs** — Normalize to `postgresql://` for SQLAlchemy
+7. **`jsonb_set` on json column** — Cast to `::jsonb` first, back to `::json`
+8. **GIN index on json column** — Cast to `(langchain_metadata::jsonb) jsonb_path_ops`
+9. **HNSW 2000 dim limit** — Skip index for vectors >2000 dimensions
+10. **OpenRouter context length** — Use `check_embedding_ctx_length=False`
+11. **`build_store` needs table** — Use lazy `store` property, call `init_schema` first
 
 ---
 
@@ -259,8 +396,10 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 
 | File | Purpose |
 |------|---------|
-| `SPEC.md` | Full technical specification (1983 lines) |
+| `README.md` | User-facing documentation (504 lines) |
+| `AGENTS.md` | This file — agent instructions |
+| `SPEC.md` | Full technical specification |
 | `PLAN.md` | Implementation plan with phases |
 | `TODO.md` | Task tracking with dependencies |
-| `TASKS/` | Individual task specs |
-| `AGENTS.md` | This file — agent instructions |
+| `TASKS/` | Individual task specs (23 files) |
+| `docs/` | Comprehensive documentation (9 files, 2319 lines) |
