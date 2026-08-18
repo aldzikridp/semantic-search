@@ -11,9 +11,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 7 |
+| ✅ Done | 8 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 16 |
+| ⏳ Not Started | 15 |
 
 ---
 
@@ -45,7 +45,7 @@
 ### Phase 8: Core Service (Split into Sub-tasks)
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-008](TASKS/TASK-008-service-skeleton.md) | Service Skeleton & Stats | ⏳ | 002-007 | 009-014 |
+| [TASK-008](TASKS/TASK-008-service-skeleton.md) | Service Skeleton & Stats | ✅ | 002-007 | 009-014 |
 | [TASK-009](TASKS/TASK-009-service-ingest.md) | Service — Ingest (Write Path) | ⏳ | 008 | 012-014 |
 | [TASK-010](TASKS/TASK-010-service-search.md) | Service — Search (Read Path) | ⏳ | 008 | 014 |
 | [TASK-011](TASKS/TASK-011-service-delete.md) | Service — Delete | ⏳ | 008 | 012-014 |

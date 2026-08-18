@@ -1,6 +1,6 @@
 # TASK-008: Core Service — Skeleton & Stats
 
-> **Phase**: 8.1-8.2 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 8.1-8.2 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-002, TASK-003, TASK-004, TASK-005, TASK-006, TASK-007
 > **Blocks**: TASK-009, TASK-010, TASK-011, TASK-012, TASK-013, TASK-014
 
