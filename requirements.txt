@@ -1,0 +1,30 @@
+# Pinned dependencies (spec §2)
+# For reproducible deployments; pyproject.toml uses >= lower bounds.
+
+# Core
+langchain==0.2.16
+langchain-core==0.2.41
+langchain-postgres==0.0.17
+langchain-community==0.2.16
+langchain-text-splitters==0.2.4
+psycopg[binary]==3.2.1
+pgvector==0.3.5
+sqlalchemy==2.0.32
+pydantic==2.8.2
+pydantic-settings==2.4.0
+typer==0.12.3
+pymupdf==1.24.10
+python-dotenv==1.0.1
+jq==1.7.0
+
+# Providers (install only the ones you need, or use pyproject.toml extras)
+langchain-openai==0.1.22
+langchain-huggingface==0.0.3
+langchain-ollama==0.1.0
+sentence-transformers==3.0.1
+
+# Test
+pytest==8.3.2
+pytest-asyncio==0.23.8
+pytest-cov==5.0.0
+testcontainers==4.8.1

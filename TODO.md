@@ -7,9 +7,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 0 |
+| ✅ Done | 3 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 23 |
+| ⏳ Not Started | 20 |
 
 ---
 
@@ -18,13 +18,13 @@
 ### Phase 1: Project Scaffolding
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-001](TASKS/TASK-001-project-scaffolding.md) | Project Scaffolding & Dependencies | ⏳ | — | 002-009 |
+| [TASK-001](TASKS/TASK-001-project-scaffolding.md) | Project Scaffolding & Dependencies | ✅ | — | 002-009 |
 
 ### Phase 2-3: Configuration & Models
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
-| [TASK-002](TASKS/TASK-002-configuration-layer.md) | Configuration Layer (config.py, errors.py) | ⏳ | 001 | 006-009 |
-| [TASK-003](TASKS/TASK-003-data-models.md) | Data Models (models.py) | ⏳ | 001 | 008-009 |
+| [TASK-002](TASKS/TASK-002-configuration-layer.md) | Configuration Layer (config.py, errors.py) | ✅ | 001 | 006-009 |
+| [TASK-003](TASKS/TASK-003-data-models.md) | Data Models (models.py) | ✅ | 001 | 008-009 |
 
 ### Phase 4-5: Document Processing
 | # | Task | Status | Depends On | Blocks |
