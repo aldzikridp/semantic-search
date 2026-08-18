@@ -1,6 +1,6 @@
 # TASK-007: Database Store
 
-> **Phase**: 7 | **Priority**: Critical | **Status**: Not Started
+> **Phase**: 7 | **Priority**: Critical | **Status**: ✅ Done
 > **Depends on**: TASK-002 (config), TASK-001 (langchain-postgres)
 > **Blocks**: TASK-008
 

@@ -11,9 +11,9 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Done | 6 |
+| ✅ Done | 7 |
 | 🔄 In Progress | 0 |
-| ⏳ Not Started | 17 |
+| ⏳ Not Started | 16 |
 
 ---
 
@@ -40,7 +40,7 @@
 | # | Task | Status | Depends On | Blocks |
 |---|------|--------|------------|--------|
 | [TASK-006](TASKS/TASK-006-embeddings-factory.md) | Embeddings Factory (embeddings.py) | ✅ | 002 | 007-008 |
-| [TASK-007](TASKS/TASK-007-database-store.md) | Database Store (store.py) | ⏳ | 002, 001 | 008 |
+| [TASK-007](TASKS/TASK-007-database-store.md) | Database Store (store.py) | ✅ | 002, 001 | 008 |
 
 ### Phase 8: Core Service (Split into Sub-tasks)
 | # | Task | Status | Depends On | Blocks |

@@ -41,6 +41,10 @@
             pkgs.libffi
             pkgs.openssl
 
+            # For numpy / langchain-postgres (libstdc++.so.6, libz.so.1)
+            pkgs.stdenv.cc.cc.lib
+            pkgs.zlib
+
             # For jq Python package
             pkgs.jq
             pkgs.oniguruma
@@ -92,6 +96,12 @@
           # Environment variables for development
           LANG = "en_US.UTF-8";
           PYTHONPATH = "src";
+
+          # Ensure libstdc++ and libz are found by numpy
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.stdenv.cc.cc.lib
+            pkgs.zlib
+          ];
         };
       });
 }
