@@ -548,3 +548,7 @@ semsearch -c /path/to/config.env stats
 ```
 
 If not specified, uses `.env` in current directory. Environment variables override config file values.
+
+## Filters
+
+See [Filter Guide](docs/filter-guide.md) for comprehensive filter documentation.
