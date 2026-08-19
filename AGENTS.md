@@ -105,7 +105,8 @@ store.add_documents(docs)  # Row-by-row commits, re-embeds everything
 
 Use `PGVectorStore` ONLY for:
 - `similarity_search_with_score()` — search
-- `delete(filter=...)` — deletion
+
+All writes (INSERT, UPDATE, DELETE) go through raw `psycopg` connections. This includes filtered deletes — build a `WHERE` clause from the filter dict instead of calling `PGVectorStore.delete()`.
 
 ### 3. Deterministic TEXT IDs
 
@@ -213,6 +214,33 @@ semsearch -c staging.env stats
 
 **Implementation:** Global callback stores path in `_config_path`, all commands use `get_settings(_config_path)`.
 
+### 15. Connection reuse in batch operations
+
+Methods that touch the database accept an optional `conn: psycopg.Connection | None = None` parameter. When `None`, the method creates and closes its own connection. When provided, the caller owns the connection lifecycle.
+
+**Ownership rule:**
+- `conn=None` → method owns it (create → use → close)
+- `conn` provided → caller owns it (method uses it, never closes)
+
+**Batch pattern (`ingest_dir`):**
+```python
+conn = self._get_conn()
+try:
+    for file_path in files:
+        self.ingest(file_path, conn=conn)  # Reuse one connection
+finally:
+    conn.close()
+```
+
+**Connection counts:**
+| Method | Connections |
+|--------|-------------|
+| `ingest()` standalone | 1 (merged read+write) |
+| `ingest_dir(N files)` | 1 (batch) + 1 (prune) |
+| `delete()` standalone | 1 |
+| `reingest()` | 1 (shared by delete + ingest) |
+| `stats()` | 1 |
+
 ---
 
 ## Provider Configuration
@@ -317,12 +345,12 @@ nix develop --command bash -c "TEST_DATABASE_URL='$TEST_DATABASE_URL' pytest -v"
 | `test_embeddings.py` | 6 | Provider factory, OpenRouter routing |
 | `test_service_ingest.py` | 9 | CASE A/B/C/D, idempotency |
 | `test_service_search.py` | 5 | Search, filters, score range |
-| `test_service_delete.py` | 3 | Delete by source, empty filter |
-| `test_service_ingest_dir.py` | 11 | File discovery, prune, error handling |
+| `test_service_delete.py` | 5 | Delete by source, empty filter, raw SQL, filter result |
+| `test_service_ingest_dir.py` | 15 | File discovery, prune, error handling, connection reuse |
 | `test_service_provider.py` | 13 | OpenRouter routing, error propagation |
 | `test_cli.py` | 4 | CLI commands, help text |
 
-**Total: 58 tests**
+**Total: 71 tests**
 
 ### MockEmbeddings
 

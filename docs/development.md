@@ -382,18 +382,44 @@ for chunk in chunks:
 embed_documents([c.page_content for c in chunks])
 ```
 
-### Connection Pooling
+### Connection Reuse in Batch Operations
 
-PGEngine manages connection pooling:
+`ingest_dir()` reuses a single connection for all files:
 
 ```python
-# Create once
-engine = build_engine(settings)
-
-# Reuse for all operations
-with engine.begin() as conn:
-    ...
+# This is what ingest_dir() does internally:
+conn = self._get_conn()
+try:
+    for file in files:
+        self.ingest(file, conn=conn)  # Reuse connection
+finally:
+    conn.close()
 ```
+
+This reduces TCP + auth overhead from 2N to 1 for N files.
+
+### Connection Reuse
+
+Service methods accept an optional `conn` parameter for connection reuse:
+
+```python
+# Standalone call — method creates and closes its own connection
+result = svc.ingest(Path("file.txt"))  # 1 connection
+
+# Batch — one connection for all files
+conn = svc._get_conn()
+try:
+    for path in files:
+        svc.ingest(path, conn=conn)  # Reuses same connection
+finally:
+    conn.close()
+```
+
+`ingest_dir()` and `reingest()` use this pattern automatically:
+- `ingest_dir(N files)` → 1 connection for the batch (not 2N)
+- `reingest()` → 1 connection for delete + ingest (not 2)
+
+For standalone calls (`ingest()`, `delete()`, `stats()`), each call creates its own connection. This is fine for CLI single-command usage.
 
 ### Lazy Store
 

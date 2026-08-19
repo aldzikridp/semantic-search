@@ -116,12 +116,20 @@ class SemanticSearchService:
 
     # ---- Ingest ----
 
-    def ingest(self, path: Path, *, reembed_unchanged: bool = False) -> IngestResult:
+    def ingest(
+        self,
+        path: Path,
+        *,
+        reembed_unchanged: bool = False,
+        conn: psycopg.Connection | None = None,
+    ) -> IngestResult:
         """Ingest a single file into the store.
 
         Args:
             path: File to ingest.
             reembed_unchanged: If True, force re-embed everything.
+            conn: Optional psycopg connection to reuse. If None, a new
+                connection is created and closed internally.
 
         Returns:
             IngestResult with counts for each case.
@@ -129,6 +137,9 @@ class SemanticSearchService:
         table = self.settings.collection_name
         source = str(path)
         now = datetime.now(timezone.utc)
+        owns_conn = conn is None
+        if owns_conn:
+            conn = self._get_conn()
 
         try:
             # Step 1: Load
@@ -148,19 +159,15 @@ class SemanticSearchService:
             ]
 
             # Step 4: Fetch existing rows
-            conn = self._get_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"SELECT langchain_id, chunk_index, document_hash "
-                        f"FROM {table} "
-                        f"WHERE source = %s "
-                        f"ORDER BY chunk_index",
-                        (source,),
-                    )
-                    existing_rows = cur.fetchall()
-            finally:
-                conn.close()
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT langchain_id, chunk_index, document_hash "
+                    f"FROM {table} "
+                    f"WHERE source = %s "
+                    f"ORDER BY chunk_index",
+                    (source,),
+                )
+                existing_rows = cur.fetchall()
 
             existing_by_index: dict[int, tuple] = {row[1]: row for row in existing_rows}
 
@@ -192,75 +199,68 @@ class SemanticSearchService:
             texts_to_embed = [chunks[i].page_content for i in bc_indices]
             vectors = self.embedder.embed_documents(texts_to_embed) if texts_to_embed else []
 
-            # Step 8: Execute writes in ONE transaction
-            conn = self._get_conn()
-            try:
-                with conn.cursor() as cur:
-                    # CASE A: cheap UPDATE (ingested_at only)
-                    if case_a_ids:
-                        cur.execute(
-                            f"UPDATE {table} "
-                            f"SET langchain_metadata = jsonb_set("
-                            f"  langchain_metadata::jsonb, '{{ingested_at}}', "
-                            f"  to_jsonb(CAST(%s AS text))"
-                            f")::json "
-                            f"WHERE langchain_id = ANY(%s)",
-                            (now.isoformat(), case_a_ids),
-                        )
+            # Step 8: Execute writes in ONE transaction (same connection)
+            with conn.cursor() as cur:
+                # CASE A: cheap UPDATE (ingested_at only)
+                if case_a_ids:
+                    cur.execute(
+                        f"UPDATE {table} "
+                        f"SET langchain_metadata = jsonb_set("
+                        f"  langchain_metadata::jsonb, '{{ingested_at}}', "
+                        f"  to_jsonb(CAST(%s AS text))"
+                        f")::json "
+                        f"WHERE langchain_id = ANY(%s)",
+                        (now.isoformat(), case_a_ids),
+                    )
 
-                    # CASE B + C: INSERT ... ON CONFLICT DO UPDATE
-                    for vec_idx, chunk_idx in enumerate(bc_indices):
-                        chunk = chunks[chunk_idx]
-                        h = hashes[chunk_idx]
-                        vec = vectors[vec_idx]
-                        chunk_id = f"{source}::{chunk_idx}"
+                # CASE B + C: INSERT ... ON CONFLICT DO UPDATE
+                for vec_idx, chunk_idx in enumerate(bc_indices):
+                    chunk = chunks[chunk_idx]
+                    h = hashes[chunk_idx]
+                    vec = vectors[vec_idx]
+                    chunk_id = f"{source}::{chunk_idx}"
 
-                        metadata: dict[str, Any] = {
-                            "doc_type": chunk.metadata.get("doc_type"),
-                            "ingested_at": now.isoformat(),
-                            "chunk_size": self.settings.chunk_size,
-                            "chunk_overlap": self.settings.chunk_overlap,
-                        }
-                        if "page" in chunk.metadata:
-                            metadata["page"] = chunk.metadata["page"]
-                        if "row" in chunk.metadata:
-                            metadata["row"] = chunk.metadata["row"]
+                    metadata: dict[str, Any] = {
+                        "doc_type": chunk.metadata.get("doc_type"),
+                        "ingested_at": now.isoformat(),
+                        "chunk_size": self.settings.chunk_size,
+                        "chunk_overlap": self.settings.chunk_overlap,
+                    }
+                    if "page" in chunk.metadata:
+                        metadata["page"] = chunk.metadata["page"]
+                    if "row" in chunk.metadata:
+                        metadata["row"] = chunk.metadata["row"]
 
-                        cur.execute(
-                            f"INSERT INTO {table} "
-                            f"  (langchain_id, embedding, content, langchain_metadata, "
-                            f"   source, chunk_index, document_hash) "
-                            f"VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s) "
-                            f"ON CONFLICT (source, chunk_index) DO UPDATE "
-                            f"SET embedding = EXCLUDED.embedding, "
-                            f"    content = EXCLUDED.content, "
-                            f"    document_hash = EXCLUDED.document_hash, "
-                            f"    langchain_metadata = EXCLUDED.langchain_metadata",
-                            (
-                                chunk_id,
-                                str(vec),
-                                chunk.page_content,
-                                json.dumps(metadata),
-                                source,
-                                chunk_idx,
-                                h,
-                            ),
-                        )
+                    cur.execute(
+                        f"INSERT INTO {table} "
+                        f"  (langchain_id, embedding, content, langchain_metadata, "
+                        f"   source, chunk_index, document_hash) "
+                        f"VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s) "
+                        f"ON CONFLICT (source, chunk_index) DO UPDATE "
+                        f"SET embedding = EXCLUDED.embedding, "
+                        f"    content = EXCLUDED.content, "
+                        f"    document_hash = EXCLUDED.document_hash, "
+                        f"    langchain_metadata = EXCLUDED.langchain_metadata",
+                        (
+                            chunk_id,
+                            str(vec),
+                            chunk.page_content,
+                            json.dumps(metadata),
+                            source,
+                            chunk_idx,
+                            h,
+                        ),
+                    )
 
-                    # CASE D: delete stale tail chunks
-                    if case_d_count > 0:
-                        cur.execute(
-                            f"DELETE FROM {table} "
-                            f"WHERE source = %s AND chunk_index >= %s",
-                            (source, len(chunks)),
-                        )
+                # CASE D: delete stale tail chunks
+                if case_d_count > 0:
+                    cur.execute(
+                        f"DELETE FROM {table} "
+                        f"WHERE source = %s AND chunk_index >= %s",
+                        (source, len(chunks)),
+                    )
 
-                    conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
+                conn.commit()
 
             return IngestResult(
                 source=source,
@@ -271,8 +271,12 @@ class SemanticSearchService:
                 ingested_at=now,
             )
 
-        except Exception as e:
-            raise FileIngestError(f"Failed to ingest {path}: {e}") from e
+        except Exception as exc:
+            conn.rollback()
+            raise FileIngestError(f"Failed to ingest {path}: {exc}") from exc
+        finally:
+            if owns_conn:
+                conn.close()
 
     # ---- Ingest Dir ----
 
@@ -319,20 +323,30 @@ class SemanticSearchService:
         aggregate = BatchAggregate()
         ingested_sources: set[str] = set()
 
-        for file_path in files:
-            try:
-                result = self.ingest(file_path, reembed_unchanged=reembed_unchanged)
-                succeeded += 1
-                ingested_sources.add(str(file_path))
-                aggregate.chunks_added += result.chunks_added
-                aggregate.chunks_reused += result.chunks_reused
-                aggregate.chunks_updated += result.chunks_updated
-                aggregate.chunks_pruned += result.chunks_pruned
-            except Exception as e:
-                failed += 1
-                failed_files.append({"path": str(file_path), "error": str(e)})
-                if not continue_on_error:
-                    raise FileIngestError(f"Failed to ingest {file_path}: {e}") from e
+        # Open one connection for the entire batch (ingest loop + prune).
+        conn = self._get_conn()
+        try:
+            for file_path in files:
+                try:
+                    result = self.ingest(
+                        file_path,
+                        reembed_unchanged=reembed_unchanged,
+                        conn=conn,
+                    )
+                    succeeded += 1
+                    ingested_sources.add(str(file_path))
+                    aggregate.chunks_added += result.chunks_added
+                    aggregate.chunks_reused += result.chunks_reused
+                    aggregate.chunks_updated += result.chunks_updated
+                    aggregate.chunks_pruned += result.chunks_pruned
+                except Exception as e:
+                    conn.rollback()  # Clean up failed transaction
+                    failed += 1
+                    failed_files.append({"path": str(file_path), "error": str(e)})
+                    if not continue_on_error:
+                        raise FileIngestError(f"Failed to ingest {file_path}: {e}") from e
+        finally:
+            conn.close()
 
         elapsed = time.monotonic() - start_time
 
@@ -343,6 +357,7 @@ class SemanticSearchService:
             table = self.settings.collection_name
             dir_prefix = str(dir_path) + "/"
 
+            # Reuse one connection for prune SELECT + all deletes.
             conn = self._get_conn()
             try:
                 with conn.cursor() as cur:
@@ -352,19 +367,19 @@ class SemanticSearchService:
                         (dir_prefix + "%",),
                     )
                     db_sources = {row[0] for row in cur.fetchall()}
+
+                orphan_sources = db_sources - ingested_sources
+
+                for source in orphan_sources:
+                    pruned_sources.append(source)
+                    if not prune_dry_run:
+                        try:
+                            delete_result = self.delete({"source": source}, conn=conn)
+                            pruned_chunks += delete_result.deleted_count
+                        except Exception as e:
+                            logger.warning(f"Failed to prune {source}: {e}")
             finally:
                 conn.close()
-
-            orphan_sources = db_sources - ingested_sources
-
-            for source in orphan_sources:
-                pruned_sources.append(source)
-                if not prune_dry_run:
-                    try:
-                        delete_result = self.delete({"source": source})
-                        pruned_chunks += delete_result.deleted_count
-                    except Exception as e:
-                        logger.warning(f"Failed to prune {source}: {e}")
 
         return BatchIngestResult(
             dir=str(dir_path),
@@ -382,59 +397,75 @@ class SemanticSearchService:
 
     # ---- Delete ----
 
-    def delete(self, filter: dict) -> DeleteResult:
-        """Delete every chunk matching the filter."""
+    def delete(
+        self, filter: dict, conn: psycopg.Connection | None = None
+    ) -> DeleteResult:
+        """Delete every chunk matching the filter.
+
+        Args:
+            filter: Dict of key-value pairs to match. Empty dict deletes all.
+            conn: Optional psycopg connection to reuse. If None, a new
+                connection is created and closed internally.
+
+        Returns:
+            DeleteResult with the count of deleted chunks.
+        """
         table = self.settings.collection_name
+        owns_conn = conn is None
+        if owns_conn:
+            conn = self._get_conn()
 
         try:
-            conn = self._get_conn()
-            try:
-                with conn.cursor() as cur:
-                    if not filter:
-                        cur.execute(f"SELECT COUNT(*) FROM {table}")
-                        count = cur.fetchone()[0]
-                        cur.execute(f"DELETE FROM {table}")
-                    else:
-                        # Use PGVectorStore for filtered delete
-                        # First count using the store
-                        # For simplicity, count before and after
-                        cur.execute(f"SELECT COUNT(*) FROM {table}")
-                        count_before = cur.fetchone()[0]
+            with conn.cursor() as cur:
+                if not filter:
+                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    count = cur.fetchone()[0]
+                    cur.execute(f"DELETE FROM {table}")
+                else:
+                    # Build WHERE clause from filter dict.
+                    # 'source' is a top-level column; other keys live inside
+                    # langchain_metadata JSON.
+                    conditions: list[str] = []
+                    params: list[Any] = []
+                    for key, value in filter.items():
+                        if key == "source":
+                            conditions.append("source = %s")
+                        else:
+                            conditions.append(f"langchain_metadata->>'{key}' = %s")
+                        params.append(str(value))
+                    where_clause = " AND ".join(conditions)
 
-                        # Use PGVectorStore delete (it manages its own connection)
-                        cur.close()
-                        conn.close()
-                        conn = None
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE {where_clause}",
+                        params,
+                    )
+                    count = cur.fetchone()[0]
+                    cur.execute(
+                        f"DELETE FROM {table} WHERE {where_clause}",
+                        params,
+                    )
 
-                        self.store.delete(filter=filter)
-
-                        conn = self._get_conn()
-                        cur = conn.cursor()
-                        cur.execute(f"SELECT COUNT(*) FROM {table}")
-                        count_after = cur.fetchone()[0]
-                        count = count_before - count_after
-
-                    conn.commit()
-            except Exception:
-                if conn:
-                    conn.rollback()
-                raise
-            finally:
-                if conn:
-                    conn.close()
+                conn.commit()
 
             return DeleteResult(deleted_count=count, filter=filter)
 
-        except Exception as e:
-            raise DeleteError(f"Delete failed: {e}") from e
+        except Exception as exc:
+            conn.rollback()
+            raise DeleteError(f"Delete failed: {exc}") from exc
+        finally:
+            if owns_conn:
+                conn.close()
 
     # ---- Reingest ----
 
     def reingest(self, path: Path) -> IngestResult:
         """Delete all chunks for the source, then ingest fresh."""
-        source = str(path)
-        self.delete({"source": source})
-        return self.ingest(path, reembed_unchanged=True)
+        conn = self._get_conn()
+        try:
+            self.delete({"source": str(path)}, conn=conn)
+            return self.ingest(path, reembed_unchanged=True, conn=conn)
+        finally:
+            conn.close()
 
     # ---- Search ----
 
@@ -532,11 +563,18 @@ class SemanticSearchService:
 
     # ---- Stats ----
 
-    def stats(self) -> dict[str, Any]:
-        """Return statistics about the chunks table."""
-        table = self.settings.collection_name
+    def stats(self, conn: psycopg.Connection | None = None) -> dict[str, Any]:
+        """Return statistics about the chunks table.
 
-        conn = self._get_conn()
+        Args:
+            conn: Optional psycopg connection to reuse. If None, a new
+                connection is created and closed internally.
+        """
+        table = self.settings.collection_name
+        owns_conn = conn is None
+        if owns_conn:
+            conn = self._get_conn()
+
         try:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT COUNT(*) FROM {table}")
@@ -554,7 +592,8 @@ class SemanticSearchService:
                 )
                 sources_by_count = [(row[0], row[1]) for row in cur.fetchall()]
         finally:
-            conn.close()
+            if owns_conn:
+                conn.close()
 
         return {
             "table": table,

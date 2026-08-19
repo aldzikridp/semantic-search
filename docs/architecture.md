@@ -40,10 +40,11 @@ semantic-search/
 
 **Problem:** `PGVectorStore.add_documents()` does row-by-row commits and re-embeds all documents.
 
-**Solution:** The service owns the write path using SQLAlchemy transactions:
+**Solution:** The service owns the write path using raw `psycopg` connections with parameterized SQL:
 
 ```python
-with engine.begin() as conn:
+conn = psycopg.connect(db_url)
+with conn.cursor() as cur:
     # CASE A: cheap UPDATE (no embedding)
     # CASE B + C: INSERT ... ON CONFLICT DO UPDATE
     # CASE D: DELETE stale tail chunks
@@ -55,6 +56,8 @@ with engine.begin() as conn:
 - Pre-computed embeddings (no double-embedding)
 - UPSERT via `ON CONFLICT`
 - CASE D cleanup in same transaction
+
+**Note:** All writes (INSERT, UPDATE, DELETE) go through raw `psycopg`. `PGVectorStore` is used read-only for `similarity_search_with_score()`.
 
 ### 2. Content-Hash Caching
 
@@ -153,11 +156,16 @@ Query → PGVectorStore.similarity_search_with_score()
 ### Delete Flow
 
 ```
-Filter → Count before (SELECT COUNT)
-       → PGVectorStore.delete(filter=...)
-       → Count after (SELECT COUNT)
-       → deleted_count = before - after
+Filter → Build WHERE clause from filter dict
+       → Count matching (SELECT COUNT ... WHERE ...)
+       → Delete matching (DELETE ... WHERE ...)
+       → Commit
+       → Return DeleteResult
 ```
+
+**Filter handling:**
+- `source` → top-level column: `WHERE source = %s`
+- Other keys → JSONB path: `WHERE langchain_metadata->>'key' = %s`
 
 ## Module Responsibilities
 
@@ -207,12 +215,14 @@ Filter → Count before (SELECT COUNT)
 
 - `SemanticSearchService`: Main orchestration class
   - `init_schema()`: Create table
-  - `ingest(path)`: Single file ingest
-  - `ingest_dir(dir_path)`: Batch ingest
+  - `ingest(path, *, conn=None)`: Single file ingest
+  - `ingest_dir(dir_path)`: Batch ingest (reuses one connection for all files)
   - `search(query)`: Similarity search
-  - `delete(filter)`: Delete by filter
-  - `stats()`: Table statistics
-  - `reingest(path)`: Delete + ingest
+  - `delete(filter, conn=None)`: Delete by filter (raw SQL)
+  - `stats(conn=None)`: Table statistics
+  - `reingest(path)`: Delete + ingest (reuses one connection)
+
+**Connection reuse:** Methods accept an optional `conn` parameter. When `None`, they create and close their own connection. When provided, the caller owns the lifecycle. `ingest_dir()` and `reingest()` open one connection and pass it through to sub-operations.
 
 ### `cli.py`
 
@@ -253,3 +263,4 @@ Filter → Count before (SELECT COUNT)
 - **Vector quantization**: Reduce storage for large corpora
 - **Hybrid search**: Combine vector + full-text search
 - **Multi-tenancy**: Separate collections per user
+- **Connection pooling**: Add `psycopg_pool` for concurrent access patterns

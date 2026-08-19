@@ -119,7 +119,7 @@ svc.init_schema(recreate=True) # Drop and recreate
 
 **Raises:** `SchemaMismatchError` if table exists with wrong vector dimension.
 
-### `ingest(path, reembed_unchanged=False)`
+### `ingest(path, reembed_unchanged=False, conn=None)`
 
 Ingest a single file.
 
@@ -135,14 +135,17 @@ print(result.chunks_reused)
 |-------|------|---------|-------------|
 | `path` | `Path` | — | File to ingest |
 | `reembed_unchanged` | `bool` | `False` | Force re-embed all chunks |
+| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
 
 **Returns:** `IngestResult`
 
 **Raises:** `FileIngestError` on failure.
 
+**Note:** When called from `ingest_dir()`, the connection is reused across all files for better performance.
+
 ### `ingest_dir(dir_path, **kwargs)`
 
-Ingest all supported files in a directory.
+Ingest all supported files in a directory. Opens one database connection and reuses it for all files in the batch.
 
 ```python
 result = svc.ingest_dir(
@@ -172,6 +175,8 @@ print(result.aggregate.chunks_added)
 
 **Raises:** `FileIngestError` if `continue_on_error=False` and a file fails.
 
+**Performance:** Uses a single connection for the entire batch (all files + prune). For N files, this means 1 connection instead of 2N.
+
 ### `search(query, k=None, filter=None)`
 
 Cosine similarity search.
@@ -194,9 +199,9 @@ for r in results:
 
 **Raises:** `ValueError` if k out of range, `SearchError` on failure.
 
-### `delete(filter)`
+### `delete(filter, conn=None)`
 
-Delete chunks by filter.
+Delete chunks by filter using raw SQL.
 
 ```python
 result = svc.delete({"source": "docs/old.md"})
@@ -208,12 +213,15 @@ print(result.deleted_count)
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `filter` | `dict` | — | Filter dict (empty = delete all) |
+| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
 
 **Returns:** `DeleteResult`
 
 **Raises:** `DeleteError` on failure.
 
-### `stats()`
+**Filter handling:** `source` is matched against the top-level column; other keys are matched against `langchain_metadata` JSONB.
+
+### `stats(conn=None)`
 
 Get table statistics.
 
@@ -222,6 +230,12 @@ stats = svc.stats()
 print(stats["chunk_count"])
 print(stats["source_count"])
 ```
+
+**Parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
 
 **Returns:** `dict` with keys:
 - `table`: Table name
@@ -233,7 +247,7 @@ print(stats["source_count"])
 
 ### `reingest(path)`
 
-Delete + ingest in one step.
+Delete + ingest in one step. Opens a single connection shared by both operations.
 
 ```python
 result = svc.reingest(Path("docs/readme.md"))
@@ -247,6 +261,8 @@ print(result.chunks_added)  # All chunks are CASE C
 | `path` | `Path` | — | File to reingest |
 
 **Returns:** `IngestResult` with `chunks_added == total chunks`.
+
+**Performance:** Uses 1 connection (shared by delete + ingest), not 2.
 
 ## Models
 

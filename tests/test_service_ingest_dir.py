@@ -127,3 +127,80 @@ class TestPrune:
         result = service.ingest_dir(tmp_path, prune=True, prune_dry_run=True)
         assert any("b.txt" in s for s in result.pruned_sources)
         assert result.pruned_chunks == 0
+
+
+class TestConnectionReuse:
+    def test_ingest_dir_reuses_connection(self, service, tmp_path):
+        """ingest_dir opens one connection for all files in the batch."""
+        (tmp_path / "a.txt").write_text("content " * 100)
+        (tmp_path / "b.txt").write_text("data " * 100)
+
+        call_count = 0
+        original_get_conn = service._get_conn
+
+        def counting_get_conn():
+            nonlocal call_count
+            call_count += 1
+            return original_get_conn()
+
+        service._get_conn = counting_get_conn
+        service.ingest_dir(tmp_path)
+
+        # 1 connection for the ingest loop (all files share it)
+        assert call_count == 1
+
+    def test_ingest_dir_reuses_connection_with_prune(self, service, tmp_path):
+        """ingest_dir opens separate connection for prune SELECT."""
+        (tmp_path / "a.txt").write_text("aaa " * 100)
+        (tmp_path / "b.txt").write_text("bbb " * 100)
+
+        service.ingest_dir(tmp_path)
+        (tmp_path / "b.txt").unlink()
+
+        call_count = 0
+        original_get_conn = service._get_conn
+
+        def counting_get_conn():
+            nonlocal call_count
+            call_count += 1
+            return original_get_conn()
+
+        service._get_conn = counting_get_conn
+        service.ingest_dir(tmp_path, prune=True)
+
+        # 1 for ingest loop + 1 for prune SELECT/delete
+        assert call_count == 2
+
+    def test_reingest_reuses_connection(self, service, sample_txt):
+        """reingest opens one connection for delete + ingest."""
+        service.ingest(sample_txt)
+
+        call_count = 0
+        original_get_conn = service._get_conn
+
+        def counting_get_conn():
+            nonlocal call_count
+            call_count += 1
+            return original_get_conn()
+
+        service._get_conn = counting_get_conn
+        service.reingest(sample_txt)
+
+        # 1 connection shared by delete + ingest
+        assert call_count == 1
+
+    def test_standalone_ingest_creates_own_connection(self, service, sample_txt):
+        """Standalone ingest() with conn=None creates its own connection."""
+        call_count = 0
+        original_get_conn = service._get_conn
+
+        def counting_get_conn():
+            nonlocal call_count
+            call_count += 1
+            return original_get_conn()
+
+        service._get_conn = counting_get_conn
+        service.ingest(sample_txt)
+
+        # 1 connection (merged read+write, not 2 like before)
+        assert call_count == 1
