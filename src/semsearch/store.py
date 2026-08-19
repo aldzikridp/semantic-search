@@ -143,8 +143,10 @@ def init_schema(
 
             elif table_exists:
                 # Check vector dimension matches
+                # Use format_type() for reliable dim detection across pgvector versions.
+                # atttypmod varies: some versions store N+4, others store N directly.
                 cur.execute(
-                    "SELECT atttypmod - 4 AS dim "
+                    "SELECT (regexp_match(format_type(atttypid, atttypmod), '\\((\\d+)\\)'))[1]::int AS dim "
                     "FROM pg_attribute "
                     "WHERE attrelid = %s::regclass "
                     "AND attname = 'embedding'",
