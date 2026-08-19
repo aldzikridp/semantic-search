@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import psycopg
 from sqlalchemy import create_engine, text
 
@@ -10,6 +12,8 @@ from langchain_postgres import Column, PGEngine, PGVectorStore
 
 from semsearch.config import Settings
 from semsearch.errors import SchemaMismatchError
+
+logger = logging.getLogger(__name__)
 
 
 # Custom top-level columns (REAL Postgres columns, not JSONB keys).
@@ -57,6 +61,43 @@ def build_store(
         metadata_json_column=LC_METADATA_COLUMN,
         metadata_columns=CUSTOM_COLUMN_NAMES,
     )
+
+
+def _has_vectorscale(cur: psycopg.Cursor) -> bool:
+    """Check if pgvectorscale extension is installed in the database."""
+    cur.execute(
+        "SELECT EXISTS ("
+        "  SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'"
+        ")"
+    )
+    return cur.fetchone()[0]
+
+
+def _index_type_for_vector(cur: psycopg.Cursor, table: str) -> str:
+    """Return the vector index type on the table: 'diskann', 'hnsw', or 'none'."""
+    cur.execute(
+        "SELECT am.amname "
+        "FROM pg_class c "
+        "JOIN pg_index i ON c.oid = i.indexrelid "
+        "JOIN pg_am am ON c.relam = am.oid "
+        "WHERE i.indrelid = %s::regclass "
+        "AND c.relname = %s || '_diskann_idx'",
+        (table, table),
+    )
+    if cur.fetchone():
+        return "diskann"
+    cur.execute(
+        "SELECT am.amname "
+        "FROM pg_class c "
+        "JOIN pg_index i ON c.oid = i.indexrelid "
+        "JOIN pg_am am ON c.relam = am.oid "
+        "WHERE i.indrelid = %s::regclass "
+        "AND c.relname = %s || '_hnsw_idx'",
+        (table, table),
+    )
+    if cur.fetchone():
+        return "hnsw"
+    return "none"
 
 
 def init_schema(
@@ -118,6 +159,12 @@ def init_schema(
                         f"Use recreate=True to drop and re-create."
                     )
 
+                # Auto-upgrade: HNSW → DiskANN if vectorscale is available
+                index_type = _index_type_for_vector(cur, table)
+                if index_type == "hnsw" and _has_vectorscale(cur):
+                    logger.info("Upgrading HNSW index to DiskANN on %s", table)
+                    cur.execute(f"DROP INDEX IF EXISTS {table}_hnsw_idx")
+
     finally:
         conn.close()
 
@@ -132,30 +179,80 @@ def init_schema(
             metadata_columns=CUSTOM_COLUMNS,
         )
 
-        # Step 4: Create indexes (init_vectorstore_table does NOT create them)
-        conn = psycopg.connect(db_url.replace("+psycopg", ""))
-        conn.autocommit = True
-        try:
-            with conn.cursor() as cur:
-                # HNSW index has 2000 dim limit; skip for high-dimensional vectors
-                if vector_size <= 2000:
-                    cur.execute(
-                        f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
-                        f"ON {table} USING hnsw (embedding vector_cosine_ops) "
-                        f"WITH (m = 16, ef_construction = 64)"
-                    )
+    # Step 4: Create/upgrade indexes (idempotent)
+    # Runs for both new tables and existing tables (to create missing indexes
+    # or upgrade HNSW → DiskANN).
+    conn = psycopg.connect(db_url.replace("+psycopg", ""))
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            has_vectorscale = _has_vectorscale(cur)
+            index_type = _index_type_for_vector(cur, table)
+
+            if has_vectorscale and index_type != "diskann":
+                # Create DiskANN (new table or upgrade from HNSW)
+                if index_type == "hnsw":
+                    cur.execute(f"DROP INDEX IF EXISTS {table}_hnsw_idx")
+
+                cfg = settings.diskann  # DiskANNConfig or None
+                storage = cfg.storage_layout if cfg else "memory_optimized"
+                bits = cfg.num_bits_per_dimension if cfg else 2
+                num_neighbors = cfg.num_neighbors if cfg else 50
+                search_list = cfg.search_list_size if cfg else 100
+                alpha = cfg.max_alpha if cfg else 1.2
+                dims = cfg.num_dimensions if cfg else 0
+
+                # num_bits_per_dimension > 1 only valid for ≤900 dims
+                if bits > 1 and vector_size > 900:
+                    bits = 1
+
                 cur.execute(
-                    f"CREATE INDEX IF NOT EXISTS {table}_metadata_gin_idx "
-                    f"ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops)"
+                    f"CREATE INDEX IF NOT EXISTS {table}_diskann_idx "
+                    f"ON {table} USING diskann (embedding vector_cosine_ops) "
+                    f"WITH ("
+                    f"  storage_layout = '{storage}',"
+                    f"  num_bits_per_dimension = {bits},"
+                    f"  num_neighbors = {num_neighbors},"
+                    f"  search_list_size = {search_list},"
+                    f"  max_alpha = {alpha},"
+                    f"  num_dimensions = {dims}"
+                    f")"
                 )
+                logger.info(
+                    "Created DiskANN index on %s (dims=%d, storage=%s, bits=%d)",
+                    table, vector_size, storage, bits,
+                )
+
+            elif not has_vectorscale and index_type == "none" and vector_size <= 2000:
+                # HNSW fallback when vectorscale is not installed
                 cur.execute(
-                    f"CREATE INDEX IF NOT EXISTS {table}_source_chunk_idx "
-                    f"ON {table} (source, chunk_index)"
+                    f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
+                    f"ON {table} USING hnsw (embedding vector_cosine_ops) "
+                    f"WITH (m = 16, ef_construction = 64)"
                 )
-                cur.execute(
-                    f"ALTER TABLE {table} "
-                    f"ADD CONSTRAINT {table}_source_chunk_unique "
-                    f"UNIQUE (source, chunk_index)"
-                )
-        finally:
-            conn.close()
+
+            # Non-vector indexes (always created, idempotent)
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {table}_metadata_gin_idx "
+                f"ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {table}_source_chunk_idx "
+                f"ON {table} (source, chunk_index)"
+            )
+            # UNIQUE constraint — use IF NOT EXISTS equivalent
+            cur.execute(
+                f"DO $$ "
+                f"BEGIN "
+                f"  IF NOT EXISTS ("
+                f"    SELECT 1 FROM pg_constraint "
+                f"    WHERE conname = '{table}_source_chunk_unique'"
+                f"  ) THEN "
+                f"    ALTER TABLE {table} "
+                f"    ADD CONSTRAINT {table}_source_chunk_unique "
+                f"    UNIQUE (source, chunk_index); "
+                f"  END IF; "
+                f"END $$;"
+            )
+    finally:
+        conn.close()

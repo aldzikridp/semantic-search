@@ -127,6 +127,26 @@ def store(self) -> PGVectorStore:
 2. User calls `init_schema()` (creates table)
 3. User calls `search()` → `store` property initializes PGVectorStore
 
+### 6. Vector Index Strategy (DiskANN vs HNSW)
+
+**Problem:** HNSW index has a 2000-dim limit. High-dimensional embeddings (e.g., Qwen3 Embedding 8B at 4096 dims) get no index at all, resulting in sequential scans.
+
+**Solution:** Auto-detect pgvectorscale and use DiskANN when available:
+
+| pgvectorscale installed? | Vector dims | Index |
+|-------------------------|-------------|-------|
+| Yes | Any | DiskANN (SBQ compressed) |
+| No | ≤2000 | HNSW |
+| No | >2000 | None (sequential scan) |
+
+**DiskANN advantages:**
+- No dimension limit
+- Disk-based (works when index exceeds RAM)
+- 16-32× compression via SBQ
+- Auto-upgrades HNSW to DiskANN when vectorscale is detected
+
+**Implementation:** `_has_vectorscale()` checks `pg_extension`, `_index_type_for_vector()` inspects existing indexes. `init_schema()` creates the best available index and upgrades HNSW → DiskANN automatically.
+
 ## Data Flow
 
 ### Ingest Flow
@@ -245,6 +265,10 @@ Filter → Build WHERE clause from filter dict
 - `typer`: CLI framework
 - `pymupdf`: PDF loader
 - `jq`: JSON loader
+
+### PostgreSQL Extensions (optional)
+
+- `pgvectorscale`: DiskANN vector index (auto-detected, no Python package needed)
 
 ### Providers (lazy-loaded)
 

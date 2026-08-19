@@ -21,10 +21,43 @@ This document describes the database schema, setup, and maintenance.
 | Name | Type | Columns | Purpose |
 |------|------|---------|---------|
 | `semsearch_chunks_pkey` | PRIMARY KEY | `langchain_id` | Unique ID |
-| `semsearch_chunks_hnsw_idx` | HNSW | `embedding` | Vector similarity (≤2000 dim) |
+| `semsearch_chunks_diskann_idx` | DiskANN | `embedding` | Vector similarity (all dims, SBQ compressed) |
+| `semsearch_chunks_hnsw_idx` | HNSW | `embedding` | Vector similarity fallback (≤2000 dim, no vectorscale) |
 | `semsearch_chunks_metadata_gin_idx` | GIN | `langchain_metadata` | JSONB filter queries |
 | `semsearch_chunks_source_chunk_idx` | B-tree | `source, chunk_index` | Re-ingest lookups |
 | `semsearch_chunks_source_chunk_unique` | UNIQUE | `source, chunk_index` | Prevent duplicates |
+
+**Note:** Only one vector index is created — DiskANN when pgvectorscale is installed, HNSW otherwise. The HNSW index is automatically upgraded to DiskANN when `init_schema()` detects vectorscale.
+
+### Vector Index Strategy
+
+The vector index type is auto-detected based on what's installed:
+
+| pgvectorscale installed? | Vector dims | Index created |
+|-------------------------|-------------|---------------|
+| Yes | Any | DiskANN (SBQ compressed, disk-based) |
+| No | ≤2000 | HNSW (in-memory) |
+| No | >2000 | None (sequential scan) |
+
+**DiskANN advantages over HNSW:**
+- No dimension limit (HNSW is capped at 2000)
+- Disk-based (works when index exceeds RAM)
+- SBQ compression: 16-32x smaller index
+- Tunable accuracy vs latency at query time
+
+**DiskANN defaults:**
+- `storage_layout = memory_optimized` (SBQ)
+- `num_bits_per_dimension = 2` (auto-downgrades to 1 for >900 dims)
+- `num_neighbors = 50`
+- `search_list_size = 100`
+
+Override via env vars:
+```bash
+SEMSEARCH_DISKANN__STORAGE_LAYOUT=memory_optimized
+SEMSEARCH_DISKANN__NUM_BITS_PER_DIMENSION=2
+SEMSEARCH_DISKANN__NUM_NEIGHBORS=50
+SEMSEARCH_DISKANN__SEARCH_LIST_SIZE=100
+```
 
 ### Metadata JSONB Structure
 
@@ -74,7 +107,16 @@ CREATE TABLE IF NOT EXISTS semsearch_chunks (
     document_hash CHAR(64)
 );
 
--- HNSW index (only for vectors ≤2000 dim)
+-- DiskANN index (preferred — requires pgvectorscale extension)
+CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
+CREATE INDEX IF NOT EXISTS semsearch_chunks_diskann_idx
+    ON semsearch_chunks USING diskann (embedding vector_cosine_ops)
+    WITH (
+        storage_layout = 'memory_optimized',
+        num_bits_per_dimension = 2
+    );
+
+-- OR: HNSW index (fallback — only for vectors ≤2000 dim)
 CREATE INDEX IF NOT EXISTS semsearch_chunks_hnsw_idx
     ON semsearch_chunks USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
@@ -102,7 +144,7 @@ ALTER TABLE semsearch_chunks
 | OpenRouter | qwen/qwen3-embedding-8b | 4096 |
 | Ollama | nomic-embed-text | 768 |
 
-**Note:** HNSW index only supports vectors ≤2000 dimensions. For larger vectors, sequential scan is used (still accurate, just slower on large datasets).
+**Note:** HNSW index only supports vectors ≤2000 dimensions. For larger vectors, install pgvectorscale for DiskANN index, or sequential scan is used (still accurate, just slower on large datasets).
 
 ## Switching Providers
 
@@ -119,6 +161,17 @@ semsearch init --recreate --yes
 semsearch ingest-dir docs/
 ```
 
+## Upgrading from HNSW to DiskANN
+
+If you have an existing table with HNSW index and install pgvectorscale:
+
+```bash
+# Just run init — it auto-upgrades the index
+semsearch init
+```
+
+No reingest needed. The data stays the same; only the index changes.
+
 ## Maintenance
 
 ### Check Table Stats
@@ -133,6 +186,17 @@ Or directly:
 SELECT COUNT(*) FROM semsearch_chunks;
 SELECT COUNT(DISTINCT source) FROM semsearch_chunks;
 SELECT source, COUNT(*) FROM semsearch_chunks GROUP BY source ORDER BY COUNT(*) DESC LIMIT 20;
+```
+
+### Check Index Type
+
+```sql
+SELECT c.relname AS index_name, am.amname AS index_type
+FROM pg_class c
+JOIN pg_index i ON c.oid = i.indexrelid
+JOIN pg_am am ON c.relam = am.oid
+WHERE i.indrelid = 'semsearch_chunks'::regclass
+AND am.amname IN ('diskann', 'hnsw');
 ```
 
 ### Vacuum and Analyze
@@ -167,11 +231,17 @@ semsearch init
 
 ### "column cannot have more than 2000 dimensions for hnsw index"
 
-The embedding dimension exceeds HNSW limit. Options:
+The embedding dimension exceeds HNSW limit. Install pgvectorscale for DiskANN index, which has no dimension limit.
 
-1. Use a smaller model (≤2000 dim)
-2. Keep current setup (sequential scan works fine for small corpora)
-3. Use `halfvec` type (up to 4000 dim, slight precision loss)
+### "vectorscale does not exist"
+
+The pgvectorscale extension is not installed. Install it:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
+```
+
+Or fall back to HNSW with a model that produces ≤2000 dimensions.
 
 ### "Id column does not exist"
 

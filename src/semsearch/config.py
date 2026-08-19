@@ -56,6 +56,31 @@ class EmbeddingProviderConfig(BaseModel):
     # For embeddings, only "prompt" is meaningful
 
 
+class DiskANNConfig(BaseModel):
+    """pgvectorscale DiskANN index configuration.
+
+    DiskANN is a disk-based ANN index that works for all vector dimensions
+    (no 2000-dim limit like HNSW). Uses Statistical Binary Quantization
+    (SBQ) for 16-32× compression.
+
+    Env var mapping:
+        SEMSEARCH_DISKANN__STORAGE_LAYOUT=memory_optimized
+        SEMSEARCH_DISKANN__NUM_BITS_PER_DIMENSION=2
+        SEMSEARCH_DISKANN__NUM_NEIGHBORS=50
+
+    All fields are optional; sensible defaults work for most cases.
+    """
+
+    storage_layout: Literal["memory_optimized", "plain"] = "memory_optimized"
+    num_bits_per_dimension: int = Field(default=2, ge=0, le=2)
+    num_neighbors: int = Field(default=50, ge=10, le=1000)
+    search_list_size: int = Field(default=100, ge=10, le=1000)
+    max_alpha: float = Field(default=1.2, ge=1.0, le=5.0)
+    num_dimensions: int = Field(
+        default=0, ge=0, description="0 = index all dims; set for Matryoshka embeddings"
+    )
+
+
 class RerankerProviderConfig(BaseModel):
     """Generic reranker configuration.
 
@@ -124,6 +149,11 @@ class Settings(BaseSettings):
 
     # ---- Reranker (optional) ----
     reranker: RerankerProviderConfig | None = None
+
+    # ---- DiskANN index (optional) ----
+    # None = auto-detect: use DiskANN if pgvectorscale is installed, else HNSW.
+    # Set to DiskANNConfig() to customize DiskANN parameters.
+    diskann: DiskANNConfig | None = None
 
 
 def get_settings(config_path: str | Path | None = None) -> Settings:

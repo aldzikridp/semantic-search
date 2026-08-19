@@ -179,13 +179,31 @@ if url.startswith("postgres://"):
     url = url.replace("postgres://", "postgresql://", 1)
 ```
 
-### 12. HNSW dimension limit
+### 12. Vector index strategy (DiskANN vs HNSW)
 
-HNSW index only supports vectors ≤2000 dimensions. Skip index creation for larger vectors:
+The project uses the best available vector index:
 
-```python
-if vector_size <= 2000:
-    cur.execute("CREATE INDEX ... USING hnsw ...")
+| pgvectorscale installed? | Vector dims | Index |
+|-------------------------|-------------|-------|
+| Yes | Any | DiskANN (SBQ compressed) |
+| No | ≤2000 | HNSW |
+| No | >2000 | None (sequential scan) |
+
+DiskANN works for all dimensions (no 2000-dim limit like HNSW). When
+vectorscale is detected, HNSW indexes are automatically upgraded to
+DiskANN on `init_schema()`.
+
+**DiskANN defaults:**
+- `storage_layout = memory_optimized` (SBQ compression)
+- `num_bits_per_dimension = 2` (16× compression; auto-downgrades to 1 for >900 dims)
+- `num_neighbors = 50`
+- `search_list_size = 100`
+
+Override via `SEMSEARCH_DISKANN__*` env vars or `DiskANNConfig` in code.
+
+```bash
+SEMSEARCH_DISKANN__STORAGE_LAYOUT=memory_optimized
+SEMSEARCH_DISKANN__NUM_BITS_PER_DIMENSION=2
 ```
 
 ### 13. Reranker (optional)
