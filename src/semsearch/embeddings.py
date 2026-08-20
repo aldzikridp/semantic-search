@@ -29,6 +29,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
         return OpenAIEmbeddings(
             api_key=cfg.api_key.get_secret_value(),
             model=cfg.model,
+            timeout=30.0,  # 30 second timeout for API calls
         )
 
     if cfg.type == "ollama":
@@ -61,6 +62,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
             model=cfg.model,
             model_kwargs=model_kwargs,
             check_embedding_ctx_length=False,
+            timeout=30.0,  # 30 second timeout for API calls
         )
 
     raise ProviderConfigError(f"unknown embedding provider type: {cfg.type}")

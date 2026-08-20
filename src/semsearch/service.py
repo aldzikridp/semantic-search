@@ -74,8 +74,8 @@ class SemanticSearchService:
         return self._store
 
     def _get_conn(self) -> psycopg.Connection:
-        """Get a raw psycopg connection."""
-        return psycopg.connect(self._db_url)
+        """Get a raw psycopg connection with timeout."""
+        return psycopg.connect(self._db_url, connect_timeout=10)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> SemanticSearchService:

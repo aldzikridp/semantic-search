@@ -211,14 +211,23 @@ def version() -> None:
 def serve(
     host: str = typer.Option("0.0.0.0", help="Bind host"),
     port: int = typer.Option(8383, help="Bind port"),
+    log_level: str = typer.Option("info", help="Log level (debug, info, warning, error)"),
 ) -> None:
     """Start the HTTP server (keeps service warm between requests)."""
+    import logging
     import uvicorn
     from semsearch.server import create_app
 
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     settings = get_settings(_config_path)
     application = create_app(settings)
-    uvicorn.run(application, host=host, port=port)
+    uvicorn.run(application, host=host, port=port, log_level=log_level)
 
 
 def main() -> None:
