@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import SecretStr
-from httpx import ASGITransport, AsyncClient
+from httpx2 import ASGITransport, AsyncClient
 from langchain_core.documents import Document
 
 from semsearch.config import Settings, EmbeddingProviderConfig

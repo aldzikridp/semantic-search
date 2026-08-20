@@ -12,7 +12,7 @@
 |---|--------|---------------|----------------|------------------|
 | 1 | Cache `_get_vector_size()` + DB read in `stats()` | Audit Finding 1 | `service.py` | 15 min |
 | 2 | Expose HNSW `ef_search` / `ef_construction` in config, tune defaults | Audit Finding 3 | `config.py`, `store.py`, `service.py` | 30 min |
-| 3 | Persistent `httpx.Client` in `Reranker` with retry | Audit Finding 7 | `reranker.py` | 30 min |
+| 3 | Persistent `httpx2.Client` in `Reranker` with retry | Audit Finding 7 | `reranker.py` | 30 min |
 | 4 | Add `semsearch serve` — FastAPI HTTP server | Audit Finding 2 (replaces REPL) | `server.py` (new), `cli.py`, `config.py`, `pyproject.toml` | 2–3 hrs |
 | 5 | Benchmark harness | New | `scripts/bench_search.py` | 30 min |
 
@@ -167,19 +167,19 @@ hnsw.ef_search = 200;` in psql.
 
 ---
 
-## Change 3: Persistent `httpx.Client` in Reranker with Retry
+## Change 3: Persistent `httpx2.Client` in Reranker with Retry
 
 ### Problem
 
-`Reranker.rerank()` creates a new `httpx.post()` request each call — no
+`Reranker.rerank()` creates a new `httpx2.post()` request each call — no
 connection reuse, no retry. Each call pays TCP+TLS handshake overhead (~150ms).
 
 ### Solution
 
-1. Create a persistent `httpx.Client` in `Reranker.__init__()` with connection
+1. Create a persistent `httpx2.Client` in `Reranker.__init__()` with connection
    pooling and timeouts.
 2. Add exponential backoff retry (3 attempts) for 429 rate limits.
-3. Use `self._client.post()` instead of `httpx.post()`.
+3. Use `self._client.post()` instead of `httpx2.post()`.
 
 ### Files to Modify
 
@@ -194,9 +194,9 @@ class Reranker:
         self.default_top_n = config.top_n
 
         # Persistent client — connection pool survives across calls
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        self._client = httpx2.Client(
+            timeout=httpx2.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
+            limits=httpx2.Limits(max_connections=10, max_keepalive_connections=5),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -223,13 +223,13 @@ class Reranker:
                 response.raise_for_status()
                 data = response.json()
                 break
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < 2:
                     import time
                     time.sleep(0.5 * (2 ** attempt))
                     continue
                 raise SearchError(f"Rerank failed: {e}") from e
-            except httpx.HTTPError as e:
+            except httpx2.HTTPError as e:
                 raise SearchError(f"Rerank failed: {e}") from e
 
         # ... rest unchanged (map indices back to documents) ...
@@ -481,10 +481,10 @@ semsearch serve --port 8383
 ### AI Agent Integration Example
 
 ```python
-import httpx
+import httpx2
 
 # Agent makes repeated calls — server stays warm
-client = httpx.Client(base_url="http://localhost:8383")
+client = httpx2.Client(base_url="http://localhost:8383")
 
 # Search
 results = client.post("/search", json={
@@ -673,7 +673,7 @@ Step 3: Apply Change 1 (vector size caching)
         → Run tests: pytest tests/test_service_search.py -v
         → Run benchmark, compare to baseline
         ↓
-Step 4: Apply Change 3 (Reranker httpx.Client)
+Step 4: Apply Change 3 (Reranker httpx2.Client)
         → Run tests: pytest tests/test_service_search.py -v
         → Run benchmark, compare
         ↓
@@ -703,7 +703,7 @@ nix develop --command bash -c "pytest -v"
 
 ### New Tests to Add
 
-**`tests/test_server.py`** — HTTP endpoint tests using `httpx.AsyncClient`:
+**`tests/test_server.py`** — HTTP endpoint tests using `httpx2.AsyncClient`:
 
 ```python
 import pytest
@@ -763,7 +763,7 @@ def test_vector_size_from_db(service):
 "uvicorn[standard]>=0.30.0",
 ```
 
-**No new test deps** — use `httpx.AsyncClient` with `ASGITransport` for
+**No new test deps** — use `httpx2.AsyncClient` with `ASGITransport` for
 testing (built into httpx, no extra package).
 
 ---
@@ -775,7 +775,7 @@ testing (built into httpx, no extra package).
 | `src/semsearch/service.py` | Modify | Cache `_get_vector_size()`, add `_get_vector_size_from_db()`, update `stats()` |
 | `src/semsearch/config.py` | Modify | Add `HnswConfig`, add `hnsw` to `Settings` |
 | `src/semsearch/store.py` | Modify | Use `HnswConfig` in `init_schema()`, set table-level `ef_search` |
-| `src/semsearch/reranker.py` | Modify | Persistent `httpx.Client`, retry logic |
+| `src/semsearch/reranker.py` | Modify | Persistent `httpx2.Client`, retry logic |
 | `src/semsearch/server.py` | **Create** | FastAPI app with all endpoints |
 | `src/semsearch/cli.py` | Modify | Add `serve` command |
 | `pyproject.toml` | Modify | Add `fastapi`, `uvicorn` deps |
@@ -791,7 +791,7 @@ testing (built into httpx, no extra package).
 |--------|------|------------|
 | Vector size caching | Low | Cache is per-instance, cleared on new service. DB read is a simple SELECT. |
 | HNSW tuning | Low | Table-level SET is session-scoped by default. Old indexes still work. Higher `ef_construction` only affects new index builds. |
-| Reranker httpx.Client | Low | Drop-in replacement. Same API, just persistent connections. Retry only for 429s. |
+| Reranker httpx2.Client | Low | Drop-in replacement. Same API, just persistent connections. Retry only for 429s. |
 | FastAPI server | Medium | New module, new deps. Mitigated by: keeping CLI path unchanged, using lifespan for clean startup/shutdown, comprehensive endpoint tests. |
 
 ---

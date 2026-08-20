@@ -1,0 +1,198 @@
+2026-08-20 16:48:45 ERROR semsearch.server: Search failed: Search failed: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.ConnectionDoesNotExistError'>: connection was closed in the middle of operation
+[SQL: SELECT "langchain_id", "content", "embedding", "source", "chunk_index", "document_hash", "langchain_metadata", cosine_distance("embedding", $1) as distance
+        FROM "public"."semsearch_chunks"  ORDER BY "embedding" <=> $1 LIMIT $2;
+        ]
+[parameters: ('[0.006794924382120371, 0.03233446553349495, 0.02097054198384285, -0.026476774364709854, 0.01089530996978283, 0.013999886810779572, 0.0025627408176660 ... (91831 characters truncated) ... 92799401283, -0.0020209040958434343, -0.007556424476206303, -0.010426693595945835, -0.0023137887474149466, -0.0098995016887784, 0.012828348204493523]', 20)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi) (947694.2ms)
+Traceback (most recent call last):
+  File "/nix/store/kxdkzc079hlg9ifg4lhjvyi2w7qwpshx-python3-3.13.14/lib/python3.13/asyncio/selector_events.py", line 987, in _read_ready__get_buffer
+    nbytes = self._sock.recv_into(buf)
+TimeoutError: [Errno 110] Connection timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 848, in _start_transaction
+    await self._transaction.start()
+  File "/nix/store/jxhsx30mj628m0k4x0sm6p33s87lnpvd-python3.13-asyncpg-0.31.0/lib/python3.13/site-packages/asyncpg/transaction.py", line 146, in start
+    await self._connection.execute(query)
+  File "/nix/store/jxhsx30mj628m0k4x0sm6p33s87lnpvd-python3.13-asyncpg-0.31.0/lib/python3.13/site-packages/asyncpg/connection.py", line 354, in execute
+    result = await self._protocol.query(query, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 369, in query
+asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed in the middle of operation
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 520, in _prepare_and_execute
+    await adapt_connection._start_transaction()
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 850, in _start_transaction
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: <class 'asyncpg.exceptions.ConnectionDoesNotExistError'>: connection was closed in the middle of operation
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/nix/store/y36xsy1ky01vkcvpycww5rrsv74jqx58-python3.13-pg-semantic-search-1.0.0/lib/python3.13/site-packages/semsearch/service.py", line 633, in asearch
+    results_with_scores = await self.store.asimilarity_search_with_score(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/nix/store/kmrpplizxihy2f52nxwynkdv8c3bcnw7-python3.13-langchain-postgres-0.0.17/lib/python3.13/site-packages/langchain_postgres/v2/vectorstores.py", line 676, in asimilarity_search_with_score
+    return await self._engine._run_as_async(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.__vs.asimilarity_search_with_score(query, k, filter, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/kmrpplizxihy2f52nxwynkdv8c3bcnw7-python3.13-langchain-postgres-0.0.17/lib/python3.13/site-packages/langchain_postgres/v2/engine.py", line 121, in _run_as_async
+    return await asyncio.wrap_future(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[arg-type]
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/kmrpplizxihy2f52nxwynkdv8c3bcnw7-python3.13-langchain-postgres-0.0.17/lib/python3.13/site-packages/langchain_postgres/v2/async_vectorstore.py", line 827, in asimilarity_search_with_score
+    docs = await self.asimilarity_search_with_score_by_vector(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        embedding=embedding, k=k, filter=filter, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/kmrpplizxihy2f52nxwynkdv8c3bcnw7-python3.13-langchain-postgres-0.0.17/lib/python3.13/site-packages/langchain_postgres/v2/async_vectorstore.py", line 854, in asimilarity_search_with_score_by_vector
+    results = await self.__query_collection(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        embedding=embedding, k=k, filter=filter, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/kmrpplizxihy2f52nxwynkdv8c3bcnw7-python3.13-langchain-postgres-0.0.17/lib/python3.13/site-packages/langchain_postgres/v2/async_vectorstore.py", line 692, in __query_collection
+    result = await conn.execute(text(dense_query_stmt), param_dict)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/ext/asyncio/engine.py", line 659, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 203, in greenlet_spawn
+    result = context.switch(value)
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 520, in _prepare_and_execute
+    await adapt_connection._start_transaction()
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 850, in _start_transaction
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/nix/store/ia5262mwzpwyq4mprf46xwhn0l09pl3h-python3.13-sqlalchemy-2.0.49/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.ConnectionDoesNotExistError'>: connection was closed in the middle of operation
+[SQL: SELECT "langchain_id", "content", "embedding", "source", "chunk_index", "document_hash", "langchain_metadata", cosine_distance("embedding", $1) as distance
+        FROM "public"."semsearch_chunks"  ORDER BY "embedding" <=> $1 LIMIT $2;
+        ]
+[parameters: ('[0.006794924382120371, 0.03233446553349495, 0.02097054198384285, -0.026476774364709854, 0.01089530996978283, 0.013999886810779572, 0.0025627408176660 ... (91831 characters truncated) ... 92799401283, -0.0020209040958434343, -0.007556424476206303, -0.010426693595945835, -0.0023137887474149466, -0.0098995016887784, 0.012828348204493523]', 20)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/nix/store/y36xsy1ky01vkcvpycww5rrsv74jqx58-python3.13-pg-semantic-search-1.0.0/lib/python3.13/site-packages/semsearch/server.py", line 103, in search
+    results = await svc.asearch(
+              ^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/nix/store/y36xsy1ky01vkcvpycww5rrsv74jqx58-python3.13-pg-semantic-search-1.0.0/lib/python3.13/site-packages/semsearch/service.py", line 639, in asearch
+    raise SearchError(f"Search failed: {e}") from e
+semsearch.errors.SearchError: Search failed: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.ConnectionDoesNotExistError'>: connection was closed in the middle of operation
+[SQL: SELECT "langchain_id", "content", "embedding", "source", "chunk_index", "document_hash", "langchain_metadata", cosine_distance("embedding", $1) as distance
+        FROM "public"."semsearch_chunks"  ORDER BY "embedding" <=> $1 LIMIT $2;
+        ]
+[parameters: ('[0.006794924382120371, 0.03233446553349495, 0.02097054198384285, -0.026476774364709854, 0.01089530996978283, 0.013999886810779572, 0.0025627408176660 ... (91831 characters truncated) ... 92799401283, -0.0020209040958434343, -0.007556424476206303, -0.010426693595945835, -0.0023137887474149466, -0.0098995016887784, 0.012828348204493523]', 20)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+
+INFO:     127.0.0.1:35736 - "POST /search HTTP/1.1" 500 Internal Server Error

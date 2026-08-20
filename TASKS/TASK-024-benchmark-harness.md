@@ -49,7 +49,7 @@ import sys
 import time
 from pathlib import Path
 
-import httpx
+import httpx2
 
 from semsearch.config import get_settings
 from semsearch.service import SemanticSearchService
@@ -137,7 +137,7 @@ def run_http_benchmark(
 ) -> dict:
     """Run benchmark against HTTP server."""
     base_url = f"http://{host}:{port}"
-    client = httpx.Client(base_url=base_url, timeout=60.0)
+    client = httpx2.Client(base_url=base_url, timeout=60.0)
 
     # Health check
     try:

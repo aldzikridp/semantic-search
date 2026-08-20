@@ -1,11 +1,11 @@
-"""Tests for persistent httpx.Client and retry logic in Reranker (TASK-027)."""
+"""Tests for persistent httpx2.Client and retry logic in Reranker (TASK-027)."""
 
 from __future__ import annotations
 
 import time
 from unittest.mock import MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 from langchain_core.documents import Document
 from pydantic import SecretStr
@@ -34,7 +34,7 @@ def _make_docs(n: int = 5) -> list[Document]:
     ]
 
 
-def _mock_success_response(results: list[dict] | None = None) -> httpx.Response:
+def _mock_success_response(results: list[dict] | None = None) -> httpx2.Response:
     """Build a mock 200 response with reranker results."""
     if results is None:
         results = [
@@ -42,19 +42,19 @@ def _mock_success_response(results: list[dict] | None = None) -> httpx.Response:
             {"index": 2, "relevance_score": 0.80},
             {"index": 1, "relevance_score": 0.60},
         ]
-    resp = MagicMock(spec=httpx.Response)
+    resp = MagicMock(spec=httpx2.Response)
     resp.status_code = 200
     resp.json.return_value = {"results": results}
     resp.raise_for_status.return_value = None
     return resp
 
 
-def _mock_429_response() -> httpx.Response:
+def _mock_429_response() -> httpx2.Response:
     """Build a mock 429 rate-limit response."""
-    resp = MagicMock(spec=httpx.Response)
+    resp = MagicMock(spec=httpx2.Response)
     resp.status_code = 429
     resp.text = "Too Many Requests"
-    resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+    resp.raise_for_status.side_effect = httpx2.HTTPStatusError(
         "429", request=MagicMock(), response=resp
     )
     return resp
@@ -66,12 +66,12 @@ def _mock_429_response() -> httpx.Response:
 
 
 class TestRerankerClient:
-    """Test persistent httpx.Client usage."""
+    """Test persistent httpx2.Client usage."""
 
     def test_client_created_on_init(self):
         config = _make_config()
         reranker = Reranker(config, "test-key")
-        assert isinstance(reranker._client, httpx.Client)
+        assert isinstance(reranker._client, httpx2.Client)
         reranker.close()
 
     def test_close_releases_client(self):
@@ -84,7 +84,7 @@ class TestRerankerClient:
     def test_context_manager(self):
         config = _make_config()
         with Reranker(config, "test-key") as reranker:
-            assert isinstance(reranker._client, httpx.Client)
+            assert isinstance(reranker._client, httpx2.Client)
         # Client is closed after exiting context
 
     def test_client_headers_contain_auth(self):
@@ -207,10 +207,10 @@ class TestRerankRetry:
         reranker = Reranker(config, "test-key")
         docs = _make_docs(3)
 
-        resp_500 = MagicMock(spec=httpx.Response)
+        resp_500 = MagicMock(spec=httpx2.Response)
         resp_500.status_code = 500
         resp_500.text = "Internal Server Error"
-        resp_500.raise_for_status.side_effect = httpx.HTTPStatusError(
+        resp_500.raise_for_status.side_effect = httpx2.HTTPStatusError(
             "500", request=MagicMock(), response=resp_500
         )
 
@@ -230,7 +230,7 @@ class TestRerankRetry:
         reranker = Reranker(config, "test-key")
         docs = _make_docs(3)
 
-        mock_post = MagicMock(side_effect=httpx.ConnectError("Connection refused"))
+        mock_post = MagicMock(side_effect=httpx2.ConnectError("Connection refused"))
         with patch.object(reranker._client, "post", mock_post):
             with pytest.raises(SearchError, match="Rerank failed"):
                 reranker.rerank("query", docs)

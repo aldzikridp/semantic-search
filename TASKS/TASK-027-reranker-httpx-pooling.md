@@ -1,4 +1,4 @@
-# TASK-027: Persistent httpx.Client in Reranker with Retry
+# TASK-027: Persistent httpx2.Client in Reranker with Retry
 
 > **Status**: Complete ✅  
 > **Phase**: Performance Phase 1  
@@ -7,20 +7,20 @@
 
 ## Objective
 
-Replace per-call `httpx.post()` with a persistent `httpx.Client` in the Reranker, and add retry logic for 429 rate limits.
+Replace per-call `httpx2.post()` with a persistent `httpx2.Client` in the Reranker, and add retry logic for 429 rate limits.
 
 ## Problem
 
 `Reranker.rerank()` creates a new HTTP request each call — no connection reuse, no retry. Each call pays TCP+TLS handshake overhead (~150ms).
 
-**Location**: `reranker.py` lines 67–82 — `httpx.post()` call  
+**Location**: `reranker.py` lines 67–82 — `httpx2.post()` call  
 **Location**: No retry logic for transient failures
 
 ## Solution
 
-1. Create a persistent `httpx.Client` in `Reranker.__init__()` with connection pooling and timeouts.
+1. Create a persistent `httpx2.Client` in `Reranker.__init__()` with connection pooling and timeouts.
 2. Add exponential backoff retry (3 attempts) for 429 rate limits.
-3. Use `self._client.post()` instead of `httpx.post()`.
+3. Use `self._client.post()` instead of `httpx2.post()`.
 
 ## Files to Modify
 
@@ -40,9 +40,9 @@ def __init__(
     self.default_top_n = config.top_n
 
     # Persistent client — connection pool survives across rerank() calls
-    self._client = httpx.Client(
-        timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
-        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+    self._client = httpx2.Client(
+        timeout=httpx2.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
+        limits=httpx2.Limits(max_connections=10, max_keepalive_connections=5),
         headers={
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -78,13 +78,13 @@ def rerank(
             response.raise_for_status()
             data = response.json()
             break
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             if e.response.status_code == 429 and attempt < 2:
                 import time
                 time.sleep(0.5 * (2 ** attempt))
                 continue
             raise SearchError(f"Rerank failed: {e}") from e
-        except httpx.HTTPError as e:
+        except httpx2.HTTPError as e:
             raise SearchError(f"Rerank failed: {e}") from e
 
     results = data.get("results", [])
@@ -114,7 +114,7 @@ def rerank(
 - 3 attempts max
 - Exponential backoff: 0.5s, 1s, 2s (only for 429s)
 - Non-429 errors raise immediately
-- Only retries on `httpx.HTTPStatusError` (429), not connection errors
+- Only retries on `httpx2.HTTPStatusError` (429), not connection errors
 
 ### Backward Compatibility
 
@@ -122,7 +122,7 @@ This is a drop-in replacement. The `rerank()` method signature and return type a
 
 ## Acceptance Criteria
 
-- [x] `Reranker` uses persistent `httpx.Client` instead of per-call `httpx.post()`
+- [x] `Reranker` uses persistent `httpx2.Client` instead of per-call `httpx2.post()`
 - [x] Connection pool settings: `max_connections=10`, `max_keepalive_connections=5`
 - [x] Retry logic: 3 attempts with exponential backoff for 429s
 - [x] Non-429 errors raise immediately

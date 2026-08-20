@@ -382,9 +382,9 @@ semsearch delete --filter ... # Delete by filter
 **AI Agent Integration:**
 
 ```python
-import httpx
+import httpx2
 
-client = httpx.Client(base_url="http://localhost:8383")
+client = httpx2.Client(base_url="http://localhost:8383")
 
 # Search
 results = client.post("/search", json={"query": "how to deploy", "k": 5}).json()

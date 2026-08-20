@@ -52,7 +52,7 @@ src/semsearch/
 ├── errors.py         # Exception hierarchy (SemSearchError base)
 ├── loaders.py        # File-type dispatch (pick_loader) + metadata injection (with_doc_type)
 ├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
-├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint) — persistent httpx.Client
+├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint) — persistent httpx2.Client
 ├── server.py         # FastAPI HTTP server (POST /search, /ingest, /ingest-dir, DELETE /delete, GET /stats, /health)
 ├── service.py        # SemanticSearchService — main orchestration layer (cached vector size)
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
@@ -374,7 +374,7 @@ nix develop --command bash -c "TEST_DATABASE_URL='$TEST_DATABASE_URL' pytest -v"
 | `test_cli.py` | 4 | CLI commands, help text |
 | `test_vector_size_cache.py` | 7 | Vector size caching, DB read |
 | `test_hnsw_tuning.py` | 7 | HNSW config, env vars, index creation |
-| `test_reranker_pooling.py` | 15 | httpx.Client, retry, build_reranker |
+| `test_reranker_pooling.py` | 15 | httpx2.Client, retry, build_reranker |
 | `test_server.py` | 11 | FastAPI endpoints, OpenAPI docs, reranker |
 
 **Total: 115 tests**
@@ -470,7 +470,7 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 | Benchmark Harness | ✅ | `TASKS/TASK-024-benchmark-harness.md` |
 | Cache Vector Size + DB Read in stats() | ✅ | `TASKS/TASK-025-cache-vector-size.md` |
 | Expose HNSW Tuning in Config | ✅ | `TASKS/TASK-026-hnsw-tuning.md` |
-| Persistent httpx.Client in Reranker | ✅ | `TASKS/TASK-027-reranker-httpx-pooling.md` |
+| Persistent httpx2.Client in Reranker | ✅ | `TASKS/TASK-027-reranker-httpx-pooling.md` |
 | FastAPI HTTP Server (`semsearch serve`) | ✅ | `TASKS/TASK-028-fastapi-server.md` |
 | Before/After Performance Benchmarks | ✅ | `TASKS/TASK-029-before-after-benchmarks.md` |
 
@@ -489,7 +489,7 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 9. **HNSW 2000 dim limit** — Skip index for vectors >2000 dimensions
 10. **OpenRouter context length** — Use `check_embedding_ctx_length=False`
 11. **`build_store` needs table** — Use lazy `store` property, call `init_schema` first
-12. **Reranker must be closed** — `Reranker` has `httpx.Client`; call `close()` or use context manager
+12. **Reranker must be closed** — `Reranker` has `httpx2.Client`; call `close()` or use context manager
 13. **FastAPI lifespan owns service** — `create_app()` closes service on shutdown; pre-built services via `service=` param are caller's responsibility
 14. **HNSW `ef_search` is table-level** — Set via `ALTER TABLE ... SET (hnsw.ef_search = N)`; users can override per-session with `SET hnsw.ef_search = N`
 15. **`_get_vector_size_from_db` needs table** — Returns `None` if table doesn't exist; falls back to API probe

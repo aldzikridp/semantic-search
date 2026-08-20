@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-import httpx
+import httpx2
 from langchain_core.documents import Document
 from pydantic import SecretStr
 
@@ -31,7 +31,7 @@ _INITIAL_BACKOFF = 0.5  # seconds
 class Reranker:
     """Generic reranker that works with any compatible endpoint.
 
-    Uses a persistent ``httpx.Client`` for connection pooling and
+    Uses a persistent ``httpx2.Client`` for connection pooling and
     retries 429 rate-limit responses with exponential backoff.
 
     Usage::
@@ -52,9 +52,9 @@ class Reranker:
         self.default_top_n = config.top_n
 
         # Persistent client — connection pool survives across rerank() calls
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
+        self._client = httpx2.Client(
+            timeout=httpx2.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
+            limits=httpx2.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -109,7 +109,7 @@ class Reranker:
                 response.raise_for_status()
                 data = response.json()
                 break
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
                     wait = _INITIAL_BACKOFF * (2 ** attempt)
                     logger.warning(
@@ -119,7 +119,7 @@ class Reranker:
                     time.sleep(wait)
                     continue
                 raise SearchError(f"Rerank failed: {e}") from e
-            except httpx.HTTPError as e:
+            except httpx2.HTTPError as e:
                 raise SearchError(f"Rerank failed: {e}") from e
 
         results = data.get("results", [])
