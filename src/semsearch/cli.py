@@ -218,16 +218,50 @@ def serve(
     import uvicorn
     from semsearch.server import create_app
 
-    # Configure logging
+    # Unified log format for both uvicorn and application logs
+    log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    # Configure root logger
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format=log_format,
+        datefmt=datefmt,
     )
+
+    # Configure uvicorn loggers to use the same format
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": log_format,
+                "datefmt": datefmt,
+            },
+        },
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.access": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+        },
+    }
 
     settings = get_settings(_config_path)
     application = create_app(settings)
-    uvicorn.run(application, host=host, port=port, log_level=log_level)
+    uvicorn.run(
+        application,
+        host=host,
+        port=port,
+        log_level=log_level,
+        log_config=log_config,
+    )
 
 
 def main() -> None:
