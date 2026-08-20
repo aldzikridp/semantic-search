@@ -99,10 +99,8 @@ def create_app(
         svc = _get_svc(request)
         start_time = time.monotonic()
         try:
-            # Run sync service method in thread pool to avoid blocking event loop
-            # during network calls (embedding API, reranker, database)
-            results = await asyncio.to_thread(
-                svc.search,
+            # Use async search to avoid sync/async deadlock with asyncpg
+            results = await svc.asearch(
                 query=req.query,
                 k=req.k,
                 filter=req.filter,

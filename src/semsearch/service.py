@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import hashlib
 import json
@@ -544,6 +545,7 @@ class SemanticSearchService:
             ValueError: k out of range.
             SearchError: Search or rerank failed.
         """
+        import time as _time
         if k is None:
             k = self.settings.default_k
         if not (1 <= k <= 50):
@@ -553,11 +555,13 @@ class SemanticSearchService:
         fetch_k = k * 4 if rerank else k
 
         try:
+            t0 = _time.monotonic()
             results_with_scores = self.store.similarity_search_with_score(
                 query,
                 k=fetch_k,
                 filter=filter,
             )
+            logger.debug("similarity_search_with_score took %.1fms", (_time.monotonic() - t0) * 1000)
         except Exception as e:
             raise SearchError(f"Search failed: {e}") from e
 
@@ -599,6 +603,77 @@ class SemanticSearchService:
             reranked_docs = reranker.rerank(query, docs, top_n=k)
 
             # Build new results from reranked docs
+            results = []
+            for doc in reranked_docs:
+                sr = doc.metadata.pop("_search_result")
+                sr.metadata["rerank_score"] = doc.metadata.get("rerank_score")
+                results.append(sr)
+
+        return results[:k]
+
+    async def asearch(
+        self,
+        query: str,
+        k: int | None = None,
+        filter: dict | None = None,
+        rerank: bool = False,
+    ) -> list[SearchResult]:
+        """Async cosine similarity search over the chunks table.
+
+        Uses async versions of embedding and DB calls to avoid blocking.
+        """
+        if k is None:
+            k = self.settings.default_k
+        if not (1 <= k <= 50):
+            raise ValueError(f"k must be between 1 and 50, got {k}")
+
+        fetch_k = k * 4 if rerank else k
+
+        try:
+            results_with_scores = await self.store.asimilarity_search_with_score(
+                query,
+                k=fetch_k,
+                filter=filter,
+            )
+        except Exception as e:
+            raise SearchError(f"Search failed: {e}") from e
+
+        # Convert to SearchResult
+        results = []
+        for doc, distance in results_with_scores:
+            score = 1.0 - distance
+            results.append(
+                SearchResult(
+                    id=doc.metadata.get("langchain_id", ""),
+                    content=doc.page_content,
+                    score=score,
+                    source=doc.metadata.get("source"),
+                    chunk_index=doc.metadata.get("chunk_index"),
+                    page=doc.metadata.get("page"),
+                    row=doc.metadata.get("row"),
+                    doc_type=doc.metadata.get("doc_type"),
+                    metadata=doc.metadata,
+                )
+            )
+
+        # Rerank if requested (reranker is sync, run in thread)
+        if rerank:
+            reranker = self.reranker
+            if reranker is None:
+                raise SearchError(
+                    "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL "
+                    "and SEMSEARCH_RERANKER__MODEL in .env"
+                )
+            docs = []
+            for r in results:
+                doc = Document(
+                    page_content=r.content,
+                    metadata={**r.metadata, "_search_result": r},
+                )
+                docs.append(doc)
+
+            reranked_docs = await asyncio.to_thread(reranker.rerank, query, docs, k)
+
             results = []
             for doc in reranked_docs:
                 sr = doc.metadata.pop("_search_result")
