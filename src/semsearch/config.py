@@ -109,6 +109,60 @@ class RerankerProviderConfig(BaseModel):
     model: str = "cohere/rerank-v3.5"
     api_key: SecretStr | None = None  # Falls back to embedding provider key
     top_n: int = 5
+    timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Reranker API request timeout in seconds",
+    )
+
+
+class TimeoutConfig(BaseModel):
+    """Network timeout configuration.
+
+    All values are in seconds. Increase if you have slow network or large documents.
+
+    Env var mapping:
+        SEMSEARCH_TIMEOUT__EMBEDDING=10.0
+        SEMSEARCH_TIMEOUT__DB_CONNECT=10
+    """
+
+    embedding: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Embedding API request timeout in seconds",
+    )
+    db_connect: int = Field(
+        default=10,
+        ge=1,
+        le=60,
+        description="Database connection timeout in seconds",
+    )
+    db_pool_recycle: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="Database connection pool recycle time in seconds",
+    )
+    db_keepalive_idle: int = Field(
+        default=60,
+        ge=10,
+        le=600,
+        description="Seconds before sending TCP keep-alive probes (0=disabled)",
+    )
+    db_keepalive_interval: int = Field(
+        default=10,
+        ge=5,
+        le=60,
+        description="Seconds between TCP keep-alive probes",
+    )
+    db_keepalive_count: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of failed probes before connection considered dead",
+    )
 
 
 class Settings(BaseSettings):
@@ -172,6 +226,9 @@ class Settings(BaseSettings):
     # ---- HNSW index ----
     # Tunable defaults applied when creating/upgrading HNSW indexes.
     hnsw: HnswConfig = Field(default_factory=HnswConfig)
+
+    # ---- Timeouts ----
+    timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
 
 
 def get_settings(config_path: str | Path | None = None) -> Settings:

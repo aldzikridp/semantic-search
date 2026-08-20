@@ -67,6 +67,7 @@ class Reranker:
         self,
         config: RerankerProviderConfig,
         api_key: str,
+        timeout: float = 10.0,
     ) -> None:
         self.base_url = config.base_url
         self.model = config.model
@@ -75,7 +76,7 @@ class Reranker:
 
         # Persistent client — connection pool survives across rerank() calls
         self._client = _httpx_module.Client(
-            timeout=_Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
+            timeout=_Timeout(connect=5.0, read=timeout, write=5.0, pool=2.0),
             limits=_Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
@@ -185,4 +186,4 @@ def build_reranker(settings: Settings) -> Reranker | None:
             "or SEMSEARCH_EMBEDDING_PROVIDER__API_KEY"
         )
 
-    return Reranker(settings.reranker, api_key)
+    return Reranker(settings.reranker, api_key, timeout=settings.reranker.timeout)

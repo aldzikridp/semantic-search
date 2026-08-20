@@ -238,6 +238,74 @@ SELECT reloptions FROM pg_class WHERE relname = 'semsearch_chunks';
 
 Higher `ef_construction` means slower builds but better recall. Reduce to 64 for faster builds.
 
+## Timeout Configuration
+
+Network timeouts prevent the server from hanging on slow or failed API calls.
+
+```bash
+# Embedding API timeout (default: 10s)
+SEMSEARCH_TIMEOUT__EMBEDDING=10.0
+
+# Database connection timeout (default: 10s)
+SEMSEARCH_TIMEOUT__DB_CONNECT=10
+
+# Database connection pool recycle time (default: 300s)
+SEMSEARCH_TIMEOUT__DB_POOL_RECYCLE=300
+
+# TCP keep-alive settings (detect dead connections)
+SEMSEARCH_TIMEOUT__DB_KEEPALIVE_IDLE=60
+SEMSEARCH_TIMEOUT__DB_KEEPALIVE_INTERVAL=10
+SEMSEARCH_TIMEOUT__DB_KEEPALIVE_COUNT=5
+
+# Reranker API timeout (default: 10s)
+SEMSEARCH_RERANKER__TIMEOUT=10.0
+```
+
+### Timeout Fields
+
+| Field | Default | Min | Max | Description |
+|-------|---------|-----|-----|-------------|
+| `timeout.embedding` | 10.0 | 1.0 | 120.0 | Embedding API request timeout |
+| `timeout.db_connect` | 10 | 1 | 60 | Database connection timeout |
+| `timeout.db_pool_recycle` | 300 | 30 | 3600 | Connection pool recycle time |
+| `timeout.db_keepalive_idle` | 60 | 10 | 600 | Seconds before sending keep-alive probes |
+| `timeout.db_keepalive_interval` | 10 | 5 | 60 | Seconds between keep-alive probes |
+| `timeout.db_keepalive_count` | 5 | 1 | 20 | Failed probes before connection considered dead |
+| `reranker.timeout` | 10.0 | 1.0 | 120.0 | Reranker API request timeout |
+
+### How Keep-Alive Prevents Stale Connections
+
+```
+Client                         Database Server
+  │                                 │
+  │── TCP connection ──────────────>│
+  │                                 │
+  │   ... idle for 60 seconds ...   │
+  │                                 │
+  │── Keep-alive probe #1 ────────>│  (tcp_keepalives_idle=60)
+  │<─ ACK ─────────────────────────│
+  │                                 │
+  │   ... 10 seconds later ...      │
+  │                                 │
+  │── Keep-alive probe #2 ────────>│  (tcp_keepalives_interval=10)
+  │<─ ACK ─────────────────────────│
+  │                                 │
+  │   Connection stays alive!       │
+```
+
+If the server doesn't respond to 5 probes, the connection is considered dead
+and a new one is created automatically.
+
+### When to Adjust
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Slow network / high latency | Increase `timeout.embedding` to 30-60s |
+| Large documents / many chunks | Keep defaults (timeouts are per-request) |
+| Remote database with high latency | Increase `timeout.db_connect` to 20-30s |
+| Connection pool exhaustion | Decrease `timeout.db_pool_recycle` to 120s |
+| Frequent stale connections | Decrease `timeout.db_keepalive_idle` to 30s |
+
 ## Reranker
 
 Reranking improves search precision by re-scoring results with a cross-encoder model.
@@ -263,6 +331,7 @@ SEMSEARCH_RERANKER__API_KEY=jina_...
 | `model` | `cohere/rerank-v3.5` | Model name |
 | `api_key` | None (falls back to embedding provider key) | API key |
 | `top_n` | `5` | Default top_n for reranking |
+| `timeout` | `10.0` | Request timeout in seconds |
 
 ### Reranker Troubleshooting
 

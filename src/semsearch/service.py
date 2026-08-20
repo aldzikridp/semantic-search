@@ -75,8 +75,17 @@ class SemanticSearchService:
         return self._store
 
     def _get_conn(self) -> psycopg.Connection:
-        """Get a raw psycopg connection with timeout."""
-        return psycopg.connect(self._db_url, connect_timeout=10)
+        """Get a raw psycopg connection with timeout and keep-alive."""
+        tc = self.settings.timeout
+        kwargs = {"connect_timeout": tc.db_connect}
+        # Add TCP keep-alive settings via PostgreSQL options
+        if tc.db_keepalive_idle > 0:
+            kwargs["options"] = (
+                f"-c tcp_keepalives_idle={tc.db_keepalive_idle}"
+                f" -c tcp_keepalives_interval={tc.db_keepalive_interval}"
+                f" -c tcp_keepalives_count={tc.db_keepalive_count}"
+            )
+        return psycopg.connect(self._db_url, **kwargs)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> SemanticSearchService:

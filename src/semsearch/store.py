@@ -44,14 +44,24 @@ def build_engine(settings: Settings) -> PGEngine:
         # Add asyncpg driver if no driver specified
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     # Pool settings to prevent stale connections:
-    # pool_recycle: recreate connections after 300s (before server closes them)
+    # pool_recycle: recreate connections before server closes them
     # pool_pre_ping: test connection health before use
+    # connect_args: TCP keep-alive settings to detect dead connections
+    tc = settings.timeout
+    connect_args = {}
+    if tc.db_keepalive_idle > 0:
+        connect_args["server_settings"] = {
+            "tcp_keepalives_idle": str(tc.db_keepalive_idle),
+            "tcp_keepalives_interval": str(tc.db_keepalive_interval),
+            "tcp_keepalives_count": str(tc.db_keepalive_count),
+        }
     return PGEngine.from_connection_string(
         url=url,
-        pool_recycle=300,
+        pool_recycle=tc.db_pool_recycle,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        connect_args=connect_args,
     )
 
 

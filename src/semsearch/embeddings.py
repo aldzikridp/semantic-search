@@ -49,32 +49,40 @@ _HTTPX_LIMITS = _Limits(
 def _make_openai_clients(
     api_key: str,
     base_url: str | None = None,
+    timeout: float = 10.0,
 ) -> tuple:
     """Create OpenAI sync and async clients with proper httpx settings.
+
+    Args:
+        api_key: OpenAI API key.
+        base_url: Optional base URL for OpenAI-compatible endpoints.
+        timeout: Request timeout in seconds.
 
     Returns (sync_client.embeddings, async_client.embeddings) for use with
     OpenAIEmbeddings.
     """
     from openai import OpenAI, AsyncOpenAI
 
+    http_timeout = _Timeout(connect=5.0, read=timeout, write=5.0, pool=2.0)
+
     http_client = _httpx_module.Client(
-        timeout=_HTTPX_TIMEOUT,
+        timeout=http_timeout,
         limits=_HTTPX_LIMITS,
     )
     http_async_client = _httpx_module.AsyncClient(
-        timeout=_HTTPX_TIMEOUT,
+        timeout=http_timeout,
         limits=_HTTPX_LIMITS,
     )
 
     kwargs = {
         "api_key": api_key,
-        "timeout": _HTTPX_TIMEOUT,
+        "timeout": http_timeout,
         "max_retries": 2,
         "http_client": http_client,
     }
     async_kwargs = {
         "api_key": api_key,
-        "timeout": _HTTPX_TIMEOUT,
+        "timeout": http_timeout,
         "max_retries": 2,
         "http_client": http_async_client,
     }
@@ -100,6 +108,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
         ImportError: if the corresponding langchain-* package is not installed.
     """
     cfg = settings.embedding_provider
+    timeout = settings.timeout.embedding
 
     if cfg.type == "openai":
         _require(cfg.api_key, "openai")
@@ -107,6 +116,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
 
         sync_client, async_client = _make_openai_clients(
             api_key=cfg.api_key.get_secret_value(),
+            timeout=timeout,
         )
         return OpenAIEmbeddings(
             client=sync_client,
@@ -141,6 +151,7 @@ def build_embedder(settings: Settings) -> "Embeddings":
         sync_client, async_client = _make_openai_clients(
             api_key=(cfg.api_key or SecretStr("not-needed")).get_secret_value(),
             base_url=base_url,
+            timeout=timeout,
         )
         return OpenAIEmbeddings(
             client=sync_client,
