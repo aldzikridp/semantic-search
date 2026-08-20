@@ -43,7 +43,16 @@ def build_engine(settings: Settings) -> PGEngine:
     elif "+asyncpg" not in url and "+psycopg" not in url:
         # Add asyncpg driver if no driver specified
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return PGEngine.from_connection_string(url=url)
+    # Pool settings to prevent stale connections:
+    # pool_recycle: recreate connections after 300s (before server closes them)
+    # pool_pre_ping: test connection health before use
+    return PGEngine.from_connection_string(
+        url=url,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+    )
 
 
 def build_store(
