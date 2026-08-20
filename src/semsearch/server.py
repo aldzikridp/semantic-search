@@ -11,6 +11,7 @@ Endpoints are read-only. Use CLI commands for data modification:
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -48,6 +49,10 @@ def create_app(
 
     The server is read-only — use CLI commands for data modification.
 
+    Sync service methods (search, stats) are run in a thread pool to avoid
+    blocking the async event loop during network calls (embedding API,
+    reranker, database).
+
     Args:
         settings: Application settings.
         service: Optional pre-built service (for testing). When provided the
@@ -61,7 +66,8 @@ def create_app(
         yield
         # Only close if we created it (caller owns pre-built services)
         if service is None:
-            svc.close()
+            # Run close in thread pool since it uses asyncio.new_event_loop()
+            await asyncio.to_thread(svc.close)
 
     app = FastAPI(
         title="semsearch",
@@ -85,7 +91,10 @@ def create_app(
     async def search(req: SearchRequest, request: Request):
         svc = _get_svc(request)
         try:
-            results = svc.search(
+            # Run sync service method in thread pool to avoid blocking event loop
+            # during network calls (embedding API, reranker, database)
+            results = await asyncio.to_thread(
+                svc.search,
                 query=req.query,
                 k=req.k,
                 filter=req.filter,
@@ -109,7 +118,8 @@ def create_app(
     async def stats(request: Request):
         svc = _get_svc(request)
         try:
-            return svc.stats()
+            # Run sync service method in thread pool
+            return await asyncio.to_thread(svc.stats)
         except SemSearchError as e:
             raise HTTPException(status_code=500, detail=str(e))
 
