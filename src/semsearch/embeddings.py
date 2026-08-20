@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
+import httpx
 from pydantic import SecretStr
 
 from semsearch.config import EmbeddingProviderConfig, Settings
 from semsearch.errors import ProviderConfigError
+
+
+# Shared httpx client settings to prevent stale keep-alive connections
+_HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0)
+_HTTPX_LIMITS = httpx.Limits(
+    max_connections=10,
+    max_keepalive_connections=5,
+    keepalive_expiry=10.0,  # Close idle connections after 10s
+)
+
+
+def _make_http_client() -> httpx.Client:
+    """Create an httpx.Client with proper connection pool settings."""
+    return httpx.Client(
+        timeout=_HTTPX_TIMEOUT,
+        limits=_HTTPX_LIMITS,
+    )
 
 
 def build_embedder(settings: Settings) -> "Embeddings":
@@ -29,7 +47,9 @@ def build_embedder(settings: Settings) -> "Embeddings":
         return OpenAIEmbeddings(
             api_key=cfg.api_key.get_secret_value(),
             model=cfg.model,
-            timeout=30.0,  # 30 second timeout for API calls
+            request_timeout=10.0,
+            max_retries=2,
+            http_client=_make_http_client(),
         )
 
     if cfg.type == "ollama":
@@ -62,7 +82,9 @@ def build_embedder(settings: Settings) -> "Embeddings":
             model=cfg.model,
             model_kwargs=model_kwargs,
             check_embedding_ctx_length=False,
-            timeout=30.0,  # 30 second timeout for API calls
+            request_timeout=10.0,
+            max_retries=2,
+            http_client=_make_http_client(),
         )
 
     raise ProviderConfigError(f"unknown embedding provider type: {cfg.type}")

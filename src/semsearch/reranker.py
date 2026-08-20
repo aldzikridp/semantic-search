@@ -53,8 +53,8 @@ class Reranker:
 
         # Persistent client — connection pool survives across rerank() calls
         self._client = httpx.Client(
-            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
