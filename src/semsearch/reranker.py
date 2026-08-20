@@ -14,7 +14,6 @@ import logging
 import time
 from typing import Any
 
-import httpx2
 from langchain_core.documents import Document
 from pydantic import SecretStr
 
@@ -28,10 +27,33 @@ _MAX_RETRIES = 3
 _INITIAL_BACKOFF = 0.5  # seconds
 
 
+def _detect_httpx():
+    """Detect which httpx version is available.
+
+    OpenAI SDK v3 uses httpx2, v2 uses httpx.
+    Returns (httpx_module, Timeout, Limits, HTTPStatusError, HTTPError).
+    """
+    try:
+        import openai
+        major_version = int(openai.__version__.split(".")[0])
+        if major_version >= 3:
+            import httpx2
+            return httpx2, httpx2.Timeout, httpx2.Limits, httpx2.HTTPStatusError, httpx2.HTTPError
+    except (ImportError, AttributeError, ValueError):
+        pass
+
+    import httpx
+    return httpx, httpx.Timeout, httpx.Limits, httpx.HTTPStatusError, httpx.HTTPError
+
+
+# Detect at module load time
+_httpx_module, _Timeout, _Limits, _HTTPStatusError, _HTTPError = _detect_httpx()
+
+
 class Reranker:
     """Generic reranker that works with any compatible endpoint.
 
-    Uses a persistent ``httpx2.Client`` for connection pooling and
+    Uses a persistent HTTP client for connection pooling and
     retries 429 rate-limit responses with exponential backoff.
 
     Usage::
@@ -52,9 +74,9 @@ class Reranker:
         self.default_top_n = config.top_n
 
         # Persistent client — connection pool survives across rerank() calls
-        self._client = httpx2.Client(
-            timeout=httpx2.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
-            limits=httpx2.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
+        self._client = _httpx_module.Client(
+            timeout=_Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0),
+            limits=_Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=10.0),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -109,7 +131,7 @@ class Reranker:
                 response.raise_for_status()
                 data = response.json()
                 break
-            except httpx2.HTTPStatusError as e:
+            except _HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
                     wait = _INITIAL_BACKOFF * (2 ** attempt)
                     logger.warning(
@@ -119,7 +141,7 @@ class Reranker:
                     time.sleep(wait)
                     continue
                 raise SearchError(f"Rerank failed: {e}") from e
-            except httpx2.HTTPError as e:
+            except _HTTPError as e:
                 raise SearchError(f"Rerank failed: {e}") from e
 
         results = data.get("results", [])

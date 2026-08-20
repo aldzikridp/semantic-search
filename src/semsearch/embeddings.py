@@ -2,17 +2,44 @@
 
 from __future__ import annotations
 
-import httpx2
+import logging
 from pydantic import SecretStr
 
 from semsearch.config import EmbeddingProviderConfig, Settings
 from semsearch.errors import ProviderConfigError
 
+logger = logging.getLogger(__name__)
 
-# Shared httpx2 client settings to prevent stale keep-alive connections
-# OpenAI SDK v3 uses httpx2, not httpx
-_HTTPX_TIMEOUT = httpx2.Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0)
-_HTTPX_LIMITS = httpx2.Limits(
+
+def _detect_httpx_version() -> tuple:
+    """Detect which httpx version the OpenAI SDK expects.
+
+    OpenAI SDK v2.x uses httpx, v3.x uses httpx2.
+
+    Returns (httpx_module, timeout_class, limits_class).
+    """
+    try:
+        import openai
+        # Check OpenAI SDK version
+        major_version = int(openai.__version__.split(".")[0])
+        if major_version >= 3:
+            import httpx2
+            return httpx2, httpx2.Timeout, httpx2.Limits
+    except (ImportError, AttributeError, ValueError):
+        pass
+
+    # Default to httpx (v2 SDK or unknown)
+    import httpx
+    return httpx, httpx.Timeout, httpx.Limits
+
+
+# Detect at module load time
+_httpx_module, _Timeout, _Limits = _detect_httpx_version()
+logger.debug("Using %s for HTTP client", _httpx_module.__name__)
+
+# Shared client settings to prevent stale keep-alive connections
+_HTTPX_TIMEOUT = _Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0)
+_HTTPX_LIMITS = _Limits(
     max_connections=10,
     max_keepalive_connections=5,
     keepalive_expiry=10.0,  # Close idle connections after 10s
@@ -23,18 +50,18 @@ def _make_openai_clients(
     api_key: str,
     base_url: str | None = None,
 ) -> tuple:
-    """Create OpenAI sync and async clients with proper httpx2 settings.
+    """Create OpenAI sync and async clients with proper httpx settings.
 
     Returns (sync_client.embeddings, async_client.embeddings) for use with
     OpenAIEmbeddings.
     """
     from openai import OpenAI, AsyncOpenAI
 
-    http_client = httpx2.Client(
+    http_client = _httpx_module.Client(
         timeout=_HTTPX_TIMEOUT,
         limits=_HTTPX_LIMITS,
     )
-    http_async_client = httpx2.AsyncClient(
+    http_async_client = _httpx_module.AsyncClient(
         timeout=_HTTPX_TIMEOUT,
         limits=_HTTPX_LIMITS,
     )

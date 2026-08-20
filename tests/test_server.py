@@ -9,8 +9,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import SecretStr
-from httpx2 import ASGITransport, AsyncClient
 from langchain_core.documents import Document
+
+# Support both httpx and httpx2 (depending on OpenAI SDK version)
+try:
+    from httpx2 import ASGITransport, AsyncClient
+except ImportError:
+    from httpx import ASGITransport, AsyncClient
 
 from semsearch.config import Settings, EmbeddingProviderConfig
 from semsearch.server import create_app

@@ -84,7 +84,7 @@ dependencies = [
     "jq>=1.7.0",                           # required by langchain_community.document_loaders.JSONLoader
     "fastapi>=0.115.0",                    # HTTP server for AI agent tool calling
     "uvicorn[standard]>=0.30.0",            # ASGI server for FastAPI
-    "httpx2>=2.0.0",                       # HTTP client (used by OpenAI SDK v3, reranker)
+    "httpx>=0.27.0",                        # HTTP client (used by reranker, embeddings)
 ]
 
 # ----------------------------------------------------------------------------

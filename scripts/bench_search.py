@@ -27,7 +27,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-import httpx2
+# Support both httpx and httpx2 (depending on OpenAI SDK version)
+try:
+    import httpx2 as _httpx_module
+except ImportError:
+    import httpx as _httpx_module
 
 from semsearch.config import get_settings
 from semsearch.service import SemanticSearchService
@@ -118,7 +122,7 @@ def _run_http_benchmark(
 ) -> dict:
     """Run benchmark against HTTP server."""
     base_url = f"http://{host}:{port}"
-    client = httpx2.Client(base_url=base_url, timeout=60.0)
+    client = _httpx_module.Client(base_url=base_url, timeout=60.0)
 
     # Health check
     try:
