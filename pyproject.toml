@@ -85,7 +85,6 @@ dependencies = [
     "fastapi>=0.115.0",                    # HTTP server for AI agent tool calling
     "uvicorn[standard]>=0.30.0",            # ASGI server for FastAPI
     "httpx>=0.27.0",                        # HTTP client (used by reranker, embeddings)
-    "code-review-graph>=2.3.7",
 ]
 
 # ----------------------------------------------------------------------------
@@ -126,6 +125,7 @@ dev = [
     "pg-semantic-search[all]",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
+    "code-review-graph>=2.3.7",
 ]
 
 
