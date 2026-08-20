@@ -227,11 +227,23 @@ def init_schema(
 
             elif not has_vectorscale and index_type == "none" and vector_size <= 2000:
                 # HNSW fallback when vectorscale is not installed
+                hnsw = settings.hnsw
                 cur.execute(
                     f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
                     f"ON {table} USING hnsw (embedding vector_cosine_ops) "
-                    f"WITH (m = 16, ef_construction = 64)"
+                    f"WITH (m = {hnsw.m}, ef_construction = {hnsw.ef_construction})"
                 )
+
+            # Set table-level ef_search default (idempotent, works for existing indexes too)
+            if not has_vectorscale:
+                hnsw = settings.hnsw
+                try:
+                    cur.execute(
+                        f"ALTER TABLE {table} SET (hnsw.ef_search = {hnsw.ef_search})"
+                    )
+                except Exception as e:
+                    # ef_search not supported by this pgvector version — safe to ignore
+                    logger.debug("Could not set hnsw.ef_search on %s: %s", table, e)
 
             # Non-vector indexes (always created, idempotent)
             cur.execute(

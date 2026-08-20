@@ -194,6 +194,50 @@ The table was created with a different schema. Recreate:
 semsearch init --recreate --yes
 ```
 
+## HNSW Index Tuning
+
+HNSW index parameters control the trade-off between recall and latency.
+
+### Configuration
+
+```bash
+# Index construction parameters (set at `semsearch init` time)
+SEMSEARCH_HNSW__M=16
+SEMSEARCH_HNSW__EF_CONSTRUCTION=200
+
+# Query-time parameter (set as table default)
+SEMSEARCH_HNSW__EF_SEARCH=80
+```
+
+### HNSW Fields
+
+| Field | Default | Min | Max | Description |
+|-------|---------|-----|-----|-------------|
+| `m` | 16 | 2 | 100 | Max connections per layer |
+| `ef_construction` | 200 | 4 | 1000 | Build-time search width |
+| `ef_search` | 80 | 10 | 1000 | Query-time search width |
+
+### Tuning Guide
+
+| Use Case | M | ef_construction | ef_search |
+|----------|---|-----------------|----------|
+| Fast, lower recall | 8 | 64 | 40 |
+| Balanced (default) | 16 | 200 | 80 |
+| High recall, slower | 32 | 300 | 150 |
+
+### HNSW Troubleshooting
+
+#### "ef_search not taking effect"
+
+`ef_search` is set at the table level. Verify with:
+```sql
+SELECT reloptions FROM pg_class WHERE relname = 'semsearch_chunks';
+```
+
+#### "Index creation slow"
+
+Higher `ef_construction` means slower builds but better recall. Reduce to 64 for faster builds.
+
 ## Reranker
 
 Reranking improves search precision by re-scoring results with a cross-encoder model.

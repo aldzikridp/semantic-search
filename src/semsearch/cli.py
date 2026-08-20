@@ -207,6 +207,20 @@ def version() -> None:
     typer.echo(f"semsearch {__version__}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Bind host"),
+    port: int = typer.Option(8383, help="Bind port"),
+) -> None:
+    """Start the HTTP server (keeps service warm between requests)."""
+    import uvicorn
+    from semsearch.server import create_app
+
+    settings = get_settings(_config_path)
+    application = create_app(settings)
+    uvicorn.run(application, host=host, port=port)
+
+
 def main() -> None:
     """Entry point with error handling."""
     try:

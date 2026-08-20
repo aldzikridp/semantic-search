@@ -10,6 +10,8 @@ Response:
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 import httpx
@@ -19,14 +21,24 @@ from pydantic import SecretStr
 from semsearch.config import RerankerProviderConfig, Settings
 from semsearch.errors import SearchError
 
+logger = logging.getLogger(__name__)
+
+# Retry configuration
+_MAX_RETRIES = 3
+_INITIAL_BACKOFF = 0.5  # seconds
+
 
 class Reranker:
     """Generic reranker that works with any compatible endpoint.
+
+    Uses a persistent ``httpx.Client`` for connection pooling and
+    retries 429 rate-limit responses with exponential backoff.
 
     Usage::
 
         reranker = Reranker(config, api_key)
         reranked_docs = reranker.rerank("query", documents, top_n=5)
+        reranker.close()
     """
 
     def __init__(
@@ -38,6 +50,26 @@ class Reranker:
         self.model = config.model
         self.api_key = api_key
         self.default_top_n = config.top_n
+
+        # Persistent client — connection pool survives across rerank() calls
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=2.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def close(self) -> None:
+        """Close the underlying HTTP client and release connections."""
+        self._client.close()
+
+    def __enter__(self) -> Reranker:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
 
     def rerank(
         self,
@@ -56,33 +88,39 @@ class Reranker:
             Reranked documents with rerank_score in metadata.
 
         Raises:
-            SearchError: If the rerank API call fails.
+            SearchError: If the rerank API call fails after retries.
         """
         if not documents:
             return []
 
         n = top_n or self.default_top_n
         texts = [doc.page_content for doc in documents]
+        payload = {
+            "model": self.model,
+            "query": query,
+            "documents": texts,
+            "top_n": n,
+        }
 
-        try:
-            response = httpx.post(
-                self.base_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "query": query,
-                    "documents": texts,
-                    "top_n": n,
-                },
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
-            raise SearchError(f"Rerank failed: {e}") from e
+        # Retry with exponential backoff for 429s
+        for attempt in range(_MAX_RETRIES):
+            try:
+                response = self._client.post(self.base_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
+                    wait = _INITIAL_BACKOFF * (2 ** attempt)
+                    logger.warning(
+                        "Reranker rate-limited (429), retrying in %.1fs (attempt %d/%d)",
+                        wait, attempt + 1, _MAX_RETRIES,
+                    )
+                    time.sleep(wait)
+                    continue
+                raise SearchError(f"Rerank failed: {e}") from e
+            except httpx.HTTPError as e:
+                raise SearchError(f"Rerank failed: {e}") from e
 
         results = data.get("results", [])
 

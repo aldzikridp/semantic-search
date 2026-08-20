@@ -340,6 +340,64 @@ semsearch reingest docs/readme.md
 
 ---
 
+## `semsearch serve`
+
+Start the HTTP server. Keeps the service warm between requests, eliminating cold-start overhead for AI agent tool calling.
+
+```bash
+semsearch serve [--host HOST] [--port PORT]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `0.0.0.0` | Bind host |
+| `--port` | `8383` | Bind port |
+
+**Examples:**
+
+```bash
+# Start with defaults
+semsearch serve
+
+# Custom host and port
+semsearch serve --host 127.0.0.1 --port 9000
+```
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/search` | Similarity search (supports `rerank`) |
+| `GET` | `/stats` | Table statistics |
+| `GET` | `/docs` | OpenAPI documentation |
+
+**Note:** The server is read-only. Use CLI commands for data modification:
+```bash
+semsearch ingest <file>       # Ingest single file
+semsearch ingest-dir <dir>    # Ingest directory
+semsearch delete --filter ... # Delete by filter
+```
+
+**AI Agent Integration:**
+
+```python
+import httpx
+
+client = httpx.Client(base_url="http://localhost:8383")
+
+# Search
+results = client.post("/search", json={"query": "how to deploy", "k": 5}).json()
+
+# Ingest
+client.post("/ingest", json={"path": "/docs/new.md"})
+
+# Stats
+stats = client.get("/stats").json()
+```
+
+---
+
 ## `semsearch version`
 
 Show version.

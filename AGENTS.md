@@ -46,16 +46,17 @@ If you encounter `ImportError` for `.so` files, add the missing Nix package to `
 ```
 src/semsearch/
 ├── __init__.py       # Package marker + __version__
-├── cli.py            # Typer CLI entry point (8 commands)
-├── config.py         # Pydantic Settings + EmbeddingProviderConfig + RerankerProviderConfig
+├── cli.py            # Typer CLI entry point (9 commands)
+├── config.py         # Pydantic Settings + EmbeddingProviderConfig + RerankerProviderConfig + HnswConfig
 ├── embeddings.py     # Provider-dispatch factory (openai, ollama, openrouter, openai_compatible)
 ├── errors.py         # Exception hierarchy (SemSearchError base)
 ├── loaders.py        # File-type dispatch (pick_loader) + metadata injection (with_doc_type)
 ├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
-├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint)
-├── service.py        # SemanticSearchService — main orchestration layer
+├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint) — persistent httpx.Client
+├── server.py         # FastAPI HTTP server (POST /search, /ingest, /ingest-dir, DELETE /delete, GET /stats, /health)
+├── service.py        # SemanticSearchService — main orchestration layer (cached vector size)
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
-└── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg)
+└── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg, HNSW config)
 
 tests/
 ├── conftest.py       # Shared fixtures (MockEmbeddings, service, pg_url)
@@ -66,7 +67,11 @@ tests/
 ├── test_service_delete.py    # Delete integration tests (3 tests)
 ├── test_service_ingest_dir.py # Directory ingest tests (11 tests)
 ├── test_service_provider.py  # Provider routing tests (13 tests)
-└── test_cli.py       # CLI tests (4 tests)
+├── test_cli.py       # CLI tests (4 tests)
+├── test_vector_size_cache.py # Vector size caching tests (7 tests)
+├── test_hnsw_tuning.py      # HNSW config tests (7 tests)
+├── test_reranker_pooling.py  # Reranker httpx tests (15 tests)
+└── test_server.py            # FastAPI server tests (17 tests)
 
 docs/
 ├── index.md          # Documentation index
@@ -367,8 +372,12 @@ nix develop --command bash -c "TEST_DATABASE_URL='$TEST_DATABASE_URL' pytest -v"
 | `test_service_ingest_dir.py` | 15 | File discovery, prune, error handling, connection reuse |
 | `test_service_provider.py` | 13 | OpenRouter routing, error propagation |
 | `test_cli.py` | 4 | CLI commands, help text |
+| `test_vector_size_cache.py` | 7 | Vector size caching, DB read |
+| `test_hnsw_tuning.py` | 7 | HNSW config, env vars, index creation |
+| `test_reranker_pooling.py` | 15 | httpx.Client, retry, build_reranker |
+| `test_server.py` | 11 | FastAPI endpoints, OpenAPI docs, reranker |
 
-**Total: 71 tests**
+**Total: 115 tests**
 
 ### MockEmbeddings
 
@@ -409,6 +418,11 @@ def pg_container():
 - `langchain-openai` — for openai, openrouter, openai_compatible
 - `langchain-ollama` — for ollama
 
+### HTTP Server (optional)
+
+- `fastapi>=0.115.0` — HTTP API for AI agent integration
+- `uvicorn[standard]>=0.30.0` — ASGI server
+
 ### Test
 
 - pytest, pytest-asyncio, pytest-cov, testcontainers
@@ -419,7 +433,9 @@ def pg_container():
 
 See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TASK-XXX-*.md`.
 
-**Status**: 23/23 tasks complete ✅
+**Status**: 29/29 tasks complete ✅
+
+### Phase 1: Core Implementation (Complete)
 
 | Phase | Task | Status |
 |-------|------|--------|
@@ -447,6 +463,17 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 | 11 | Documentation | ✅ |
 | 12 | Verification | ✅ |
 
+### Phase 1 Performance Optimization ✅
+
+| Task | Status | File |
+|------|--------|------|
+| Benchmark Harness | ✅ | `TASKS/TASK-024-benchmark-harness.md` |
+| Cache Vector Size + DB Read in stats() | ✅ | `TASKS/TASK-025-cache-vector-size.md` |
+| Expose HNSW Tuning in Config | ✅ | `TASKS/TASK-026-hnsw-tuning.md` |
+| Persistent httpx.Client in Reranker | ✅ | `TASKS/TASK-027-reranker-httpx-pooling.md` |
+| FastAPI HTTP Server (`semsearch serve`) | ✅ | `TASKS/TASK-028-fastapi-server.md` |
+| Before/After Performance Benchmarks | ✅ | `TASKS/TASK-029-before-after-benchmarks.md` |
+
 ---
 
 ## Common Pitfalls
@@ -462,6 +489,10 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 9. **HNSW 2000 dim limit** — Skip index for vectors >2000 dimensions
 10. **OpenRouter context length** — Use `check_embedding_ctx_length=False`
 11. **`build_store` needs table** — Use lazy `store` property, call `init_schema` first
+12. **Reranker must be closed** — `Reranker` has `httpx.Client`; call `close()` or use context manager
+13. **FastAPI lifespan owns service** — `create_app()` closes service on shutdown; pre-built services via `service=` param are caller's responsibility
+14. **HNSW `ef_search` is table-level** — Set via `ALTER TABLE ... SET (hnsw.ef_search = N)`; users can override per-session with `SET hnsw.ef_search = N`
+15. **`_get_vector_size_from_db` needs table** — Returns `None` if table doesn't exist; falls back to API probe
 
 ---
 
@@ -469,10 +500,12 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 
 | File | Purpose |
 |------|---------|
-| `README.md` | User-facing documentation (504 lines) |
+| `README.md` | User-facing documentation |
 | `AGENTS.md` | This file — agent instructions |
 | `SPEC.md` | Full technical specification |
-| `PLAN.md` | Implementation plan with phases |
+| `PLAN.md` | Performance optimization plan (Phase 1) |
 | `TODO.md` | Task tracking with dependencies |
-| `TASKS/` | Individual task specs (23 files) |
-| `docs/` | Comprehensive documentation (9 files, 2319 lines) |
+| `TASKS/` | Individual task specs (29 files) |
+| `docs/` | Comprehensive documentation |
+| `BENCHMARKS.md` | Performance benchmark results and methodology |
+| `semantic-search-performance-audit.md` | Performance audit findings |

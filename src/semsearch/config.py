@@ -81,6 +81,20 @@ class DiskANNConfig(BaseModel):
     )
 
 
+class HnswConfig(BaseModel):
+    """HNSW index tuning parameters.
+
+    Env var mapping:
+        SEMSEARCH_HNSW__M=16
+        SEMSEARCH_HNSW__EF_CONSTRUCTION=200
+        SEMSEARCH_HNSW__EF_SEARCH=80
+    """
+
+    m: int = Field(default=16, ge=2, le=100)
+    ef_construction: int = Field(default=200, ge=4, le=1000)
+    ef_search: int = Field(default=80, ge=10, le=1000)
+
+
 class RerankerProviderConfig(BaseModel):
     """Generic reranker configuration.
 
@@ -154,6 +168,10 @@ class Settings(BaseSettings):
     # None = auto-detect: use DiskANN if pgvectorscale is installed, else HNSW.
     # Set to DiskANNConfig() to customize DiskANN parameters.
     diskann: DiskANNConfig | None = None
+
+    # ---- HNSW index ----
+    # Tunable defaults applied when creating/upgrading HNSW indexes.
+    hnsw: HnswConfig = Field(default_factory=HnswConfig)
 
 
 def get_settings(config_path: str | Path | None = None) -> Settings:

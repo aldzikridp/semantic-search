@@ -82,6 +82,8 @@ dependencies = [
     "pymupdf>=1.24.10",                    # PyMuPDFLoader backend
     "python-dotenv>=1.0.1",                # .env loading
     "jq>=1.7.0",                           # required by langchain_community.document_loaders.JSONLoader
+    "fastapi>=0.115.0",                    # HTTP server for AI agent tool calling
+    "uvicorn[standard]>=0.30.0",            # ASGI server for FastAPI
 ]
 
 # ----------------------------------------------------------------------------

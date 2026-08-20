@@ -58,6 +58,7 @@ class SemanticSearchService:
         self.engine = engine
         self.embedder = embedder
         self._store = store
+        self._cached_vector_size: int | None = None
         self._reranker: Reranker | None = None
         # Normalize URL for raw psycopg connections
         db_url = settings.database_url
@@ -92,7 +93,12 @@ class SemanticSearchService:
         self.close()
 
     def close(self) -> None:
-        """Release the underlying PGEngine connection pool."""
+        """Release the underlying PGEngine connection pool and HTTP clients."""
+        if self._reranker is not None:
+            try:
+                self._reranker.close()
+            except Exception:
+                pass
         try:
             import asyncio
             loop = asyncio.new_event_loop()
@@ -110,9 +116,49 @@ class SemanticSearchService:
         vector_size = self._get_vector_size()
         init_schema(self.settings, self.engine, vector_size, recreate=recreate)
 
-    def _get_vector_size(self) -> int:
-        """Embed a dummy query to determine the vector dimension."""
-        return len(self.embedder.embed_query("dimension probe"))
+    def _get_vector_size(self, *, force_probe: bool = False) -> int:
+        """Return the embedding dimension. Cached after first probe.
+
+        Args:
+            force_probe: If True, ignore the cache and re-embed the probe string.
+        """
+        if not force_probe and self._cached_vector_size is not None:
+            return self._cached_vector_size
+        size = len(self.embedder.embed_query("dimension probe"))
+        self._cached_vector_size = size
+        return size
+
+    def _get_vector_size_from_db(
+        self, conn: psycopg.Connection | None = None
+    ) -> int | None:
+        """Read the vector dimension straight from pg_attribute — no API call.
+
+        Args:
+            conn: Optional psycopg connection to reuse. If None, a new
+                connection is created and closed internally.
+        """
+        table = self.settings.collection_name
+        owns_conn = conn is None
+        if owns_conn:
+            conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT (regexp_match(format_type(atttypid, atttypmod), "
+                    "'\\((\\d+)\\)'))[1]::int "
+                    "FROM pg_attribute "
+                    "WHERE attrelid = %s::regclass AND attname = 'embedding'",
+                    (table,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            # Table doesn't exist or other DB error — fall back to probe.
+            logger.debug("_get_vector_size_from_db failed: %s", e)
+            return None
+        finally:
+            if owns_conn:
+                conn.close()
 
     # ---- Ingest ----
 
@@ -591,6 +637,9 @@ class SemanticSearchService:
                     f"LIMIT 20"
                 )
                 sources_by_count = [(row[0], row[1]) for row in cur.fetchall()]
+
+            # Read vector dim from DB while connection is still open
+            embedding_dim = self._get_vector_size_from_db(conn) or self._get_vector_size()
         finally:
             if owns_conn:
                 conn.close()
@@ -598,7 +647,7 @@ class SemanticSearchService:
         return {
             "table": table,
             "embedding_provider": self.settings.embedding_provider.type,
-            "embedding_dim": self._get_vector_size(),
+            "embedding_dim": embedding_dim,
             "chunk_count": chunk_count,
             "source_count": source_count,
             "sources_by_count": sources_by_count,
