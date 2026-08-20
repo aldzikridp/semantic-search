@@ -227,6 +227,23 @@ Show version.
 semsearch version
 ```
 
+## HTTP API (Serve Mode)
+
+Start a FastAPI HTTP server for AI agent integration:
+
+```bash
+semsearch serve --port 8383
+```
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/search` | Similarity search |
+| `GET` | `/stats` | Table statistics |
+| `GET` | `/docs` | Swagger UI |
+
+See [docs/api-reference.md](docs/api-reference.md) for full API docs.
+
 ## Supported File Types
 
 | Extension | Loader | Notes |

@@ -1,403 +1,431 @@
-# API Reference
+# HTTP API Reference
 
-Python API for programmatic use.
+> API documentation for `semsearch serve` — the read-only HTTP server mode.
 
-## Quick Start
+## Overview
 
-```python
-from semsearch.config import Settings
-from semsearch.service import SemanticSearchService
+The `semsearch serve` command starts a FastAPI HTTP server that keeps the
+`SemanticSearchService` warm between requests, eliminating cold-start overhead
+for AI agent tool calling.
 
-# Load settings from .env
-settings = Settings()
-
-# Create service
-with SemanticSearchService.from_settings(settings) as svc:
-    # Initialize schema
-    svc.init_schema()
-
-    # Ingest a file
-    result = svc.ingest(Path("docs/readme.md"))
-    print(result.chunks_added)
-
-    # Search
-    results = svc.search("how to configure", k=5)
-    for r in results:
-        print(f"{r.score:.3f}: {r.content[:100]}")
-
-    # Delete
-    result = svc.delete({"source": "docs/readme.md"})
-    print(result.deleted_count)
+```bash
+semsearch serve --host 0.0.0.0 --port 8383 --log-level info
 ```
 
-## Settings
+**Interactive API docs:** `http://localhost:8383/docs` (Swagger UI)
 
-### `Settings`
+## Base URL
 
-```python
-from semsearch.config import Settings
-
-settings = Settings()
-# Loads from environment variables and .env file
+```
+http://localhost:8383
 ```
 
-**Fields:**
+## Endpoints
+
+### Health Check
+
+Check if the server is running.
+
+```
+GET /health
+```
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+**Example:**
+```bash
+curl http://localhost:8383/health
+```
+
+---
+
+### Search
+
+Perform semantic similarity search over ingested documents.
+
+```
+POST /search
+```
+
+**Request Body:**
+```json
+{
+  "query": "how to deploy",
+  "k": 5,
+  "filter": null,
+  "rerank": false
+}
+```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `database_url` | `str` | `postgresql+psycopg://...` | PostgreSQL connection string |
-| `collection_name` | `str` | `semsearch_chunks` | Table name |
-| `embedding_provider` | `EmbeddingProviderConfig` | HuggingFace | Provider config |
-| `chunk_size` | `int` | `1000` | Chunk size in characters |
-| `chunk_overlap` | `int` | `200` | Overlap between chunks |
-| `default_k` | `int` | `5` | Default top-k for search |
-| `recreate_collection_on_init` | `bool` | `False` | Safety flag |
+| `query` | string | *required* | Search query text |
+| `k` | integer | `5` | Number of results to return (1–50) |
+| `filter` | object | `null` | Filter criteria (see Filter Syntax) |
+| `rerank` | boolean | `false` | Enable reranking for better precision |
 
-### `EmbeddingProviderConfig`
-
-```python
-from semsearch.config import EmbeddingProviderConfig
-
-config = EmbeddingProviderConfig(
-    type="openai",
-    model="text-embedding-3-small",
-    api_key=SecretStr("sk-..."),
-)
+**Response:**
+```json
+{
+  "query": "how to deploy",
+  "k": 5,
+  "filter": null,
+  "reranked": false,
+  "results": [
+    {
+      "id": "docs/deploy.md::0",
+      "content": "# Deployment Guide\n\nTo deploy...",
+      "score": 0.85,
+      "source": "docs/deploy.md",
+      "chunk_index": 0,
+      "page": null,
+      "row": null,
+      "doc_type": "text",
+      "metadata": {
+        "doc_type": "text",
+        "ingested_at": "2026-08-20T05:32:56.257931+00:00",
+        "chunk_size": 1000,
+        "chunk_overlap": 200,
+        "source": "docs/deploy.md",
+        "chunk_index": 0
+      }
+    }
+  ]
+}
 ```
 
-**Fields:**
+**Result Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | `Literal[...]` | — | Provider type |
-| `model` | `str` | — | Model name |
-| `api_key` | `SecretStr \| None` | `None` | API key |
-| `base_url` | `str \| None` | `None` | Custom base URL |
-| `provider_order` | `list[str] \| None` | `None` | OpenRouter routing |
-| `provider_allow_fallbacks` | `bool \| None` | `None` | OpenRouter fallbacks |
-| `provider_ignore` | `list[str] \| None` | `None` | OpenRouter ignore |
-| `provider_only` | `list[str] \| None` | `None` | OpenRouter whitelist |
-| `provider_require_parameters` | `bool` | `False` | OpenRouter flag |
-| `provider_data_collection` | `str \| None` | `None` | Data collection policy |
-| `provider_max_price` | `dict \| None` | `None` | Price cap |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Chunk ID (`{source}::{chunk_index}`) |
+| `content` | string | Chunk text content |
+| `score` | float | Cosine similarity score (0–1, higher = better) |
+| `source` | string | File path of the source document |
+| `chunk_index` | integer | 0-based chunk position within source |
+| `page` | integer | PDF page number (null for non-PDF) |
+| `row` | integer | CSV row number (null for non-CSV) |
+| `doc_type` | string | Document type: text, pdf, csv, json |
+| `metadata` | object | Full metadata including `rerank_score` if reranked |
 
-## SemanticSearchService
+**Examples:**
 
-### Creating a Service
+```bash
+# Basic search
+curl -X POST http://localhost:8383/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how to deploy", "k": 3}'
 
-```python
-from semsearch.service import SemanticSearchService
-from semsearch.config import Settings
+# With filter
+curl -X POST http://localhost:8383/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "database", "k": 5, "filter": {"doc_type": "pdf"}}'
 
-settings = Settings()
-svc = SemanticSearchService.from_settings(settings)
+# With reranking
+curl -X POST http://localhost:8383/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "security best practices", "k": 5, "rerank": true}'
 ```
 
-Or with context manager:
+**Error Responses:**
 
-```python
-with SemanticSearchService.from_settings(settings) as svc:
-    # Use service
-    pass
-# Automatically closed
+| Status | Cause | Example |
+|--------|-------|---------|
+| 422 | Invalid `k` value | `{"detail": "k must be between 1 and 50, got 0"}` |
+| 422 | Missing `query` | `{"detail": "... validation error ..."}` |
+| 500 | Reranker not configured | `{"detail": "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL..."}` |
+| 500 | Search failed | `{"detail": "Search failed: ..."}` |
+
+---
+
+### Stats
+
+Get statistics about the ingested data.
+
+```
+GET /stats
 ```
 
-### `init_schema(recreate=False)`
-
-Create the database table.
-
-```python
-svc.init_schema()              # Create if not exists
-svc.init_schema(recreate=True) # Drop and recreate
+**Response:**
+```json
+{
+  "table": "semsearch_chunks",
+  "embedding_provider": "openrouter",
+  "embedding_dim": 4096,
+  "chunk_count": 149,
+  "source_count": 24,
+  "sources_by_count": [
+    ["docs/deploy.md", 15],
+    ["docs/api.md", 12],
+    ["docs/config.md", 8]
+  ]
+}
 ```
 
-**Parameters:**
+**Response Fields:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `recreate` | `bool` | `False` | Drop table first |
+| Field | Type | Description |
+|-------|------|-------------|
+| `table` | string | Database table name |
+| `embedding_provider` | string | Active embedding provider |
+| `embedding_dim` | integer | Vector dimensions |
+| `chunk_count` | integer | Total number of chunks |
+| `source_count` | integer | Number of unique source files |
+| `sources_by_count` | array | Top 20 sources by chunk count |
 
-**Raises:** `SchemaMismatchError` if table exists with wrong vector dimension.
-
-### `ingest(path, reembed_unchanged=False, conn=None)`
-
-Ingest a single file.
-
-```python
-result = svc.ingest(Path("docs/readme.md"))
-print(result.chunks_added)
-print(result.chunks_reused)
+**Example:**
+```bash
+curl http://localhost:8383/stats
 ```
 
-**Parameters:**
+---
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | `Path` | — | File to ingest |
-| `reembed_unchanged` | `bool` | `False` | Force re-embed all chunks |
-| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
+## Filter Syntax
 
-**Returns:** `IngestResult`
+Filters use the same syntax as `PGVectorStore` filters. They are applied
+to the `langchain_metadata` JSONB column.
 
-**Raises:** `FileIngestError` on failure.
+### Simple Filters
 
-**Note:** When called from `ingest_dir()`, the connection is reused across all files for better performance.
-
-### `ingest_dir(dir_path, **kwargs)`
-
-Ingest all supported files in a directory. Opens one database connection and reuses it for all files in the batch.
-
-```python
-result = svc.ingest_dir(
-    Path("docs/"),
-    glob="**/*.md",
-    exclude=["*/draft/*"],
-    prune=True,
-)
-print(result.files_succeeded)
-print(result.aggregate.chunks_added)
+```json
+{"doc_type": "pdf"}
 ```
 
-**Parameters:**
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `dir_path` | `Path` | — | Directory to walk |
-| `glob` | `str` | `"**/*"` | Glob pattern |
-| `exclude` | `list[str] \| None` | `None` | fnmatch patterns to skip |
-| `reembed_unchanged` | `bool` | `False` | Force re-embed |
-| `continue_on_error` | `bool` | `True` | Continue on failure |
-| `follow_symlinks` | `bool` | `False` | Follow symlinks |
-| `prune` | `bool` | `False` | Delete orphaned chunks |
-| `prune_dry_run` | `bool` | `False` | Preview prune |
-
-**Returns:** `BatchIngestResult`
-
-**Raises:** `FileIngestError` if `continue_on_error=False` and a file fails.
-
-**Performance:** Uses a single connection for the entire batch (all files + prune). For N files, this means 1 connection instead of 2N.
-
-### `search(query, k=None, filter=None)`
-
-Cosine similarity search.
-
-```python
-results = svc.search("how to configure", k=5)
-for r in results:
-    print(f"{r.score:.3f}: {r.source}")
+```json
+{"source": "docs/deploy.md"}
 ```
 
-**Parameters:**
+### Comparison Operators
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `query` | `str` | — | Search query |
-| `k` | `int \| None` | `None` | Top-k (default from settings) |
-| `filter` | `dict \| None` | `None` | PGVectorStore filter |
+| Operator | Example | Description |
+|----------|---------|-------------|
+| `$eq` | `{"doc_type": {"$eq": "pdf"}}` | Equal (default) |
+| `$ne` | `{"doc_type": {"$ne": "json"}}` | Not equal |
+| `$gt` | `{"page": {"$gt": 5}}` | Greater than |
+| `$gte` | `{"page": {"$gte": 1}}` | Greater than or equal |
+| `$lt` | `{"page": {"$lt": 10}}` | Less than |
+| `$lte` | `{"page": {"$lte": 5}}` | Less than or equal |
 
-**Returns:** `list[SearchResult]` sorted by score DESC.
+### Pattern Matching
 
-**Raises:** `ValueError` if k out of range, `SearchError` on failure.
+| Operator | Example | Description |
+|----------|---------|-------------|
+| `$like` | `{"source": {"$like": "docs/%"}}` | SQL LIKE pattern |
+| `$ilike` | `{"source": {"$ilike": "%DEPLOY%"}}` | Case-insensitive LIKE |
 
-### `delete(filter, conn=None)`
+### List Operators
 
-Delete chunks by filter using raw SQL.
+| Operator | Example | Description |
+|----------|---------|-------------|
+| `$in` | `{"doc_type": {"$in": ["pdf", "csv"]}}` | Match any value |
+| `$nin` | `{"doc_type": {"$nin": ["json"]}}` | Match none of values |
 
-```python
-result = svc.delete({"source": "docs/old.md"})
-print(result.deleted_count)
+### Logical Operators
+
+```json
+{"$and": [
+  {"doc_type": "pdf"},
+  {"page": {"$gte": 5}}
+]}
 ```
 
-**Parameters:**
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `filter` | `dict` | — | Filter dict (empty = delete all) |
-| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
-
-**Returns:** `DeleteResult`
-
-**Raises:** `DeleteError` on failure.
-
-**Filter handling:** `source` is matched against the top-level column; other keys are matched against `langchain_metadata` JSONB.
-
-### `stats(conn=None)`
-
-Get table statistics.
-
-```python
-stats = svc.stats()
-print(stats["chunk_count"])
-print(stats["source_count"])
+```json
+{"$or": [
+  {"doc_type": "pdf"},
+  {"doc_type": "csv"}
+]}
 ```
 
-**Parameters:**
+### Existence
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `conn` | `psycopg.Connection \| None` | `None` | Connection to reuse. If `None`, creates and closes its own. |
-
-**Returns:** `dict` with keys:
-- `table`: Table name
-- `embedding_provider`: Provider type
-- `embedding_dim`: Vector dimension
-- `chunk_count`: Total chunks
-- `source_count`: Distinct sources
-- `sources_by_count`: Top 20 sources by chunk count
-
-### `reingest(path)`
-
-Delete + ingest in one step. Opens a single connection shared by both operations.
-
-```python
-result = svc.reingest(Path("docs/readme.md"))
-print(result.chunks_added)  # All chunks are CASE C
+```json
+{"page": {"$exists": true}}
 ```
 
-**Parameters:**
+---
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | `Path` | — | File to reingest |
+## Reranking
 
-**Returns:** `IngestResult` with `chunks_added == total chunks`.
+When `rerank: true`, the search process:
 
-**Performance:** Uses 1 connection (shared by delete + ingest), not 2.
+1. Fetches `k * 4` candidates from vector search
+2. Sends candidates to the reranker API
+3. Returns top-k results with `rerank_score` in metadata
 
-## Models
-
-### `SearchResult`
-
-```python
-class SearchResult(BaseModel):
-    id: str                    # "{source}::{chunk_index}"
-    content: str               # Chunk text
-    score: float               # 1.0 - cosine_distance
-    source: str | None         # File path
-    chunk_index: int | None    # 0-based position
-    page: int | None           # PDF page number
-    row: int | None            # CSV row number
-    doc_type: str | None       # "text", "pdf", "csv", "json"
-    metadata: dict[str, Any]   # Full metadata blob
+**Configuration:**
+```bash
+SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
+SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
+SEMSEARCH_RERANKER__API_KEY=sk-or-v1-...
 ```
 
-### `IngestResult`
-
-```python
-class IngestResult(BaseModel):
-    source: str                # File path
-    chunks_added: int          # CASE C count
-    chunks_reused: int         # CASE A count
-    chunks_updated: int        # CASE B count
-    chunks_pruned: int         # CASE D count
-    ingested_at: datetime      # Timestamp
+**Response with reranking:**
+```json
+{
+  "reranked": true,
+  "results": [
+    {
+      "score": 0.85,
+      "metadata": {
+        "rerank_score": 0.92
+      }
+    }
+  ]
+}
 ```
 
-### `BatchIngestResult`
+---
 
-```python
-class BatchIngestResult(BaseModel):
-    dir: str                   # Directory path
-    files_discovered: int      # All files found
-    files_skipped_unsupported: int  # Unsupported extensions
-    files_attempted: int       # Files tried
-    files_succeeded: int       # Successful
-    files_failed: int          # Failed
-    failed_files: list[dict]   # Error details
-    aggregate: BatchAggregate  # Sum of chunk counts
-    elapsed_seconds: float     # Duration
-    pruned_sources: list[str]  # Pruned sources
-    pruned_chunks: int         # Pruned chunk count
+## Error Handling
+
+All errors return JSON with a `detail` field:
+
+```json
+{
+  "detail": "Error message here"
+}
 ```
 
-### `DeleteResult`
+| Status Code | Description |
+|-------------|-------------|
+| 200 | Success |
+| 422 | Validation error (bad request body) |
+| 500 | Server error (search failed, reranker not configured, etc.) |
+
+---
+
+## Python Client Example
 
 ```python
-class DeleteResult(BaseModel):
-    deleted_count: int         # Chunks deleted
-    filter: dict[str, Any]     # Filter used
+import httpx
+
+client = httpx.Client(base_url="http://localhost:8383")
+
+# Health check
+health = client.get("/health").json()
+print(health["status"])  # "ok"
+
+# Search
+results = client.post("/search", json={
+    "query": "how to deploy",
+    "k": 5,
+    "rerank": True,
+}).json()
+
+for r in results["results"]:
+    print(f"{r['score']:.3f} | {r['source']} | {r['content'][:80]}...")
+
+# Stats
+stats = client.get("/stats").json()
+print(f"Total chunks: {stats['chunk_count']}")
+print(f"Sources: {stats['source_count']}")
+
+# Filtered search
+results = client.post("/search", json={
+    "query": "security",
+    "k": 3,
+    "filter": {"doc_type": "pdf"},
+}).json()
 ```
 
-## Errors
+---
 
-```python
-from semsearch.errors import (
-    SemSearchError,        # Base exception
-    FileIngestError,       # Ingest failure
-    SearchError,           # Search failure
-    DeleteError,           # Delete failure
-    SchemaMismatchError,   # Wrong vector dimension
-    ProviderConfigError,   # Missing credentials
-)
+## JavaScript/TypeScript Client Example
+
+```typescript
+interface SearchRequest {
+  query: string;
+  k?: number;
+  filter?: Record<string, any>;
+  rerank?: boolean;
+}
+
+interface SearchResult {
+  id: string;
+  content: string;
+  score: number;
+  source: string;
+  chunk_index: number;
+  metadata: Record<string, any>;
+}
+
+interface SearchResponse {
+  query: string;
+  k: number;
+  filter: Record<string, any> | null;
+  reranked: boolean;
+  results: SearchResult[];
+}
+
+const BASE_URL = "http://localhost:8383";
+
+async function search(req: SearchRequest): Promise<SearchResponse> {
+  const response = await fetch(`${BASE_URL}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return response.json();
+}
+
+// Usage
+const results = await search({
+  query: "how to deploy",
+  k: 5,
+  rerank: true,
+});
+
+results.results.forEach((r) => {
+  console.log(`${r.score.toFixed(3)} | ${r.source}`);
+});
 ```
 
-## Examples
+---
 
-### Custom Settings
+## Shell Script Examples
 
-```python
-from semsearch.config import Settings, EmbeddingProviderConfig
-from pydantic import SecretStr
+```bash
+#!/bin/bash
+BASE_URL="http://localhost:8383"
 
-settings = Settings(
-    database_url="postgresql://user:pass@host:5432/db",
-    embedding_provider=EmbeddingProviderConfig(
-        type="openai",
-        model="text-embedding-3-small",
-        api_key=SecretStr("sk-..."),
-    ),
-    chunk_size=500,
-    chunk_overlap=100,
-)
+# Search and format results
+search() {
+  curl -s -X POST "$BASE_URL/search" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\": \"$1\", \"k\": ${2:-5}}" | \
+    jq -r '.results[] | "\(.score)\t\(.source)\t\(.content[0:80])"'
+}
+
+# Usage
+search "database setup" 3
+search "deployment guide" 5
 ```
 
-### Search with Filter
+---
 
-```python
-# Search only PDFs
-results = svc.search("query", filter={"doc_type": "pdf"})
+## Performance Notes
 
-# Search with prefix
-results = svc.search("query", filter={"source": {"$ilike": "docs/%"}})
+| Metric | Typical Value |
+|--------|---------------|
+| Cold start (first request) | ~2–5s (model loading) |
+| Warm request (no rerank) | 50–200ms |
+| Warm request (with rerank) | 100–500ms |
+| Stats endpoint | 5–50ms |
 
-# Combined filter
-results = svc.search("query", filter={
-    "$and": [
-        {"doc_type": "text"},
-        {"source": {"$ilike": "TASKS/%"}}
-    ]
-})
-```
+**Timeouts:**
+- Embedding API: 10s (configurable via `SEMSEARCH_TIMEOUT__EMBEDDING`)
+- Database: 10s (configurable via `SEMSEARCH_TIMEOUT__DB_CONNECT`)
+- Reranker: 10s (configurable via `SEMSEARCH_RERANKER__TIMEOUT`)
 
-### Batch Operations
+---
 
-```python
-# Ingest directory with prune
-result = svc.ingest_dir(
-    Path("docs/"),
-    glob="**/*.md",
-    exclude=["*/draft/*"],
-    prune=True,
-)
+## See Also
 
-# Check results
-if result.files_failed > 0:
-    for f in result.failed_files:
-        print(f"Failed: {f['path']}: {f['error']}")
-```
-
-### Error Handling
-
-```python
-from semsearch.errors import FileIngestError, SearchError
-
-try:
-    result = svc.ingest(Path("bad.pdf"))
-except FileIngestError as e:
-    print(f"Ingest failed: {e}")
-
-try:
-    results = svc.search("query")
-except SearchError as e:
-    print(f"Search failed: {e}")
-```
+- [CLI Reference](cli-reference.md) — Command-line interface
+- [Configuration](configuration.md) — Environment variables
+- [Getting Started](getting-started.md) — Installation and first search

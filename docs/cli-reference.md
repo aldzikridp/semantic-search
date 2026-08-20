@@ -389,9 +389,6 @@ client = httpx2.Client(base_url="http://localhost:8383")
 # Search
 results = client.post("/search", json={"query": "how to deploy", "k": 5}).json()
 
-# Ingest
-client.post("/ingest", json={"path": "/docs/new.md"})
-
 # Stats
 stats = client.get("/stats").json()
 ```

@@ -24,7 +24,7 @@ semsearch is a Python CLI tool that ingests documents (PDF, CSV, JSON, TXT, MD),
 | [Configuration](configuration.md) | Environment variables, providers |
 | [CLI Reference](cli-reference.md) | All commands with examples |
 | [Architecture](architecture.md) | Code structure, design decisions |
-| [API Reference](api-reference.md) | Python API for programmatic use |
+| [API Reference](api-reference.md) | Python API and HTTP API for serve mode |
 | [Database](database.md) | Schema, setup, migrations |
 | [Providers](providers.md) | Embedding provider details |
 | [Development](development.md) | Contributing, testing, debugging |

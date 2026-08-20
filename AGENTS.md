@@ -507,5 +507,6 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 | `TODO.md` | Task tracking with dependencies |
 | `TASKS/` | Individual task specs (29 files) |
 | `docs/` | Comprehensive documentation |
+| `docs/api-reference.md` | HTTP API reference for serve mode |
 | `BENCHMARKS.md` | Performance benchmark results and methodology |
 | `semantic-search-performance-audit.md` | Performance audit findings |
