@@ -16,6 +16,27 @@ SEMSEARCH_DATABASE_URL=postgresql://user:pass@host:5432/dbname
 SEMSEARCH_COLLECTION_NAME=semsearch_chunks
 ```
 
+### Connection Pool (opt-in)
+
+By default every operation opens a fresh psycopg connection. For long-running
+`serve` mode you can enable an opt-in connection pool so requests reuse
+c connections instead of paying connection setup per request:
+
+```bash
+# 0 disables pooling (default — pure per-call connections)
+SEMSEARCH_POOL__MIN_SIZE=1
+
+# Maximum pooled connections (default: 4)
+SEMSEARCH_POOL__MAX_SIZE=4
+
+# Seconds to wait for a free connection before failing (default: 5.0)
+SEMSEARCH_POOL__TIMEOUT=5.0
+```
+
+Only connections the service opens itself are pooled; any caller-provided
+`conn=` parameter keeps the caller-owned lifecycle (never closed, never
+pooled). Requires `psycopg-pool` (declared as a core dependency).
+
 ### Embedding Provider
 
 ```bash
@@ -175,6 +196,7 @@ The configuration is validated at startup:
 ### "provider 'openai' requires api_key"
 
 Set the API key:
+
 ```bash
 SEMSEARCH_EMBEDDING_PROVIDER__API_KEY=sk-...
 ```
@@ -182,6 +204,7 @@ SEMSEARCH_EMBEDDING_PROVIDER__API_KEY=sk-...
 ### "collection_name must match..."
 
 Use only lowercase letters, numbers, and underscores:
+
 ```bash
 SEMSEARCH_COLLECTION_NAME=semsearch_chunks  # ✅
 SEMSEARCH_COLLECTION_NAME=My-Table          # ❌
@@ -190,6 +213,7 @@ SEMSEARCH_COLLECTION_NAME=My-Table          # ❌
 ### "Id column does not exist"
 
 The table was created with a different schema. Recreate:
+
 ```bash
 semsearch init --recreate --yes
 ```
@@ -212,7 +236,7 @@ SEMSEARCH_HNSW__EF_SEARCH=80
 ### HNSW Fields
 
 | Field | Default | Min | Max | Description |
-|-------|---------|-----|-----|-------------|
+| ------- | --------- | ----- | ----- | ------------- |
 | `m` | 16 | 2 | 100 | Max connections per layer |
 | `ef_construction` | 200 | 4 | 1000 | Build-time search width |
 | `ef_search` | 80 | 10 | 1000 | Query-time search width |
@@ -220,7 +244,7 @@ SEMSEARCH_HNSW__EF_SEARCH=80
 ### Tuning Guide
 
 | Use Case | M | ef_construction | ef_search |
-|----------|---|-----------------|----------|
+| ---------- | --- | ----------------- | ---------- |
 | Fast, lower recall | 8 | 64 | 40 |
 | Balanced (default) | 16 | 200 | 80 |
 | High recall, slower | 32 | 300 | 150 |
@@ -230,6 +254,7 @@ SEMSEARCH_HNSW__EF_SEARCH=80
 #### "ef_search not taking effect"
 
 `ef_search` is set at the table level. Verify with:
+
 ```sql
 SELECT reloptions FROM pg_class WHERE relname = 'semsearch_chunks';
 ```
@@ -264,7 +289,7 @@ SEMSEARCH_RERANKER__TIMEOUT=10.0
 ### Timeout Fields
 
 | Field | Default | Min | Max | Description |
-|-------|---------|-----|-----|-------------|
+| ------- | --------- | ----- | ----- | ------------- |
 | `timeout.embedding` | 10.0 | 1.0 | 120.0 | Embedding API request timeout |
 | `timeout.db_connect` | 10 | 1 | 60 | Database connection timeout |
 | `timeout.db_pool_recycle` | 300 | 30 | 3600 | Connection pool recycle time |
@@ -299,7 +324,7 @@ and a new one is created automatically.
 ### When to Adjust
 
 | Scenario | Recommendation |
-|----------|----------------|
+| ---------- | ---------------- |
 | Slow network / high latency | Increase `timeout.embedding` to 30-60s |
 | Large documents / many chunks | Keep defaults (timeouts are per-request) |
 | Remote database with high latency | Increase `timeout.db_connect` to 20-30s |
@@ -326,7 +351,7 @@ SEMSEARCH_RERANKER__API_KEY=jina_...
 ### Reranker Fields
 
 | Field | Default | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | `base_url` | `https://openrouter.ai/api/v1/rerank` | API endpoint |
 | `model` | `cohere/rerank-v3.5` | Model name |
 | `api_key` | None (falls back to embedding provider key) | API key |

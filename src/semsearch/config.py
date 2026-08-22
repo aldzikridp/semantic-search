@@ -163,6 +163,38 @@ class TimeoutConfig(BaseModel):
     )
 
 
+class PoolConfig(BaseModel):
+    """psycopg connection pool for service-owned connections.
+
+    Opt-in: min_size=0 (the default) disables pooling entirely — every
+    operation opens a fresh connection, exactly as before. Enable via env:
+
+        SEMSEARCH_POOL__MIN_SIZE=1
+        SEMSEARCH_POOL__MAX_SIZE=4
+
+    Only connections the service itself opens are pooled; caller-provided
+    ``conn`` parameters are never touched (AGENTS.md ownership rule #15).
+    """
+
+    min_size: int = Field(
+        default=0,
+        ge=0,
+        le=10,
+        description="Pool minimum size; 0 disables pooling",
+    )
+    max_size: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Pool maximum size",
+    )
+    timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds to wait for a free connection before failing",
+    )
+
+
 class Settings(BaseSettings):
     """Top-level settings loaded from environment variables / .env file.
 
@@ -228,6 +260,9 @@ class Settings(BaseSettings):
     # ---- Timeouts ----
     timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
 
+    # ---- Service-owned connection pool (opt-in) ----
+    pool: PoolConfig = Field(default_factory=PoolConfig)
+
 
 def get_settings(config_path: str | Path | None = None) -> Settings:
     """Load settings from specified or default config file.
@@ -239,5 +274,7 @@ def get_settings(config_path: str | Path | None = None) -> Settings:
         Settings instance.
     """
     if config_path:
-        return Settings(_env_file=str(config_path))
+        # _env_file is valid pydantic-settings runtime API but missing from
+        # its static __init__ signature.
+        return Settings(_env_file=str(config_path))  # pyright: ignore[reportCallIssue]
     return Settings()

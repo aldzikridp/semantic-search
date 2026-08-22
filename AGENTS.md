@@ -55,7 +55,12 @@ src/semsearch/
 ├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
 ├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint) — persistent httpx2.Client
 ├── server.py         # FastAPI HTTP server (GET /health, POST /search, GET /stats — read-only)
-├── service.py        # SemanticSearchService — main orchestration layer (cached vector size)
+├── service.py        # SemanticSearchService — facade composing services/ mixins (public API)
+├── services/         # Internal mixins (PLAN.md Phase D) — implementation detail
+│   ├── base.py       # BaseService: settings, pool, _get_conn/_release_conn, lifecycle, _exec/_scalar
+│   ├── ingest.py     # IngestMixin: ingest, ingest_dir, reingest (service-owned write path)
+│   ├── search.py     # SearchMixin: search, asearch, rerank helpers
+│   └── admin.py      # AdminMixin: delete, stats, init_schema, dim probing
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
 └── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg, HNSW config)
 

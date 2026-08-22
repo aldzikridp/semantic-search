@@ -74,6 +74,7 @@ dependencies = [
     "langchain-community>=0.2.16",         # TextLoader, PyMuPDFLoader, CSVLoader, JSONLoader
     "langchain-text-splitters>=0.2.4",     # RecursiveCharacterTextSplitter
     "psycopg[binary]>=3.2.1",              # psycopg3, sync driver for langchain-postgres + write-path SQL
+    "psycopg-pool>=3.2",                   # opt-in service connection pool (SEMSEARCH_POOL__*)
     "pgvector>=0.3.5",                     # vector column type binding
     "sqlalchemy>=2.0.32",                  # service-owned write path (INSERT ... ON CONFLICT, etc.)
     "pydantic>=2.8.2",

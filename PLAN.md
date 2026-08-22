@@ -1,5 +1,9 @@
 # PLAN.md — Codebase Optimization Plan
 
+> **STATUS: COMPLETE — all four phases implemented, reviewed, and verified
+> (2026-08-22).** Final suite: 132 passed, 1 skipped; 0 diagnostics.
+> See per-phase status notes and the Success Metrics table for actuals.
+
 > Covers **codebase/architecture optimizations** identified by a structural
 > review (2026-08-22), building on performance work already in the codebase
 > (vector-size caching, HNSW/DiskANN tuning, reranker connection pooling,
@@ -45,6 +49,12 @@ All changes MUST comply with `AGENTS.md` design decisions:
 ## Phase A — Batch the CASE B/C ingest inserts
 
 **Priority: HIGH · Effort: small · Payoff: minutes → seconds on large ingests**
+
+**✅ DONE (2026-08-22).** Multi-row VALUES via `psycopg.sql`, batched at
+`_BC_INSERT_BATCH_SIZE = 1000`; `_build_chunk_metadata()` extracted; +2 tests
+(`TestBatchedIngest`). Benchmark (BENCHMARKS.md): 724 ms → 667 ms for 500
+chunks on local unix socket (1.1×) — round-trip savings are marginal locally,
+but scale with DB network RTT; see the honest interpretation there.
 
 ### A.1 Problem
 
@@ -155,6 +165,13 @@ else today but makes the loop body trivial and unit-testable.
 
 **Priority: MEDIUM · Effort: small · Payoff: maintainability; eliminates sync/async drift risk**
 
+**✅ DONE (2026-08-22).** All four helpers extracted as specified; both
+methods now ~12 lines; `asearch` offloads the entire rerank flow to a thread
+(improvement over plan). +6 tests (`TestResolveK` boundaries). Response
+equivalence verified against pre-refactor code — identical modulo fresh
+`ingested_at` timestamps and pgvector tie-order nondeterminism (reproduced
+twice on unchanged code).
+
 ### B.1 Problem
 
 `service.py` has two ~85-line methods (`search()` lines 560–646,
@@ -248,6 +265,13 @@ its `to_thread` offload for the sync reranker (unchanged behavior).
 ## Phase C — Connection pooling for service-owned connections
 
 **Priority: LOW · Effort: small · Payoff: ~1–5ms/request under serve load; caps concurrent DB connections**
+
+**✅ DONE (2026-08-22).** Opt-in via `SEMSEARCH_POOL__*` (min_size=0 default =
+OFF); `_leased` set preserves ownership rule #15; all 7 `_get_conn()` sites
+release via `_release_conn`; `psycopg-pool>=3.2` declared. +10 tests
+(`test_service_pool.py`). Live check: 4 ops over 2 pooled connections,
+zero leaks after `close()`. Note: total server connections at worst are
+`pool.max_size + 5` because PGEngine's separate SQLAlchemy pool coexists.
 
 ### C.1 Problem
 
@@ -343,7 +367,15 @@ SEMSEARCH_POOL__MAX_SIZE=4
 
 ## Phase D — Split the service god-class (opportunistic)
 
-**Priority: DEFERRED · Effort: medium · Payoff: long-term maintainability**
+**Priority: DEFERRED → ✅ DONE EARLY (2026-08-22)**
+
+**Governance note:** §D.3's trigger criteria were *not* met (~880 lines at
+the time; no 4th responsibility; no cross-area change forcing it).
+Implemented early by owner decision. Review found the split clean:
+facade composes `IngestMixin` / `SearchMixin` / `AdminMixin` on
+`BaseService`; zero import cycles; all 9 external consumers untouched;
+suite green (132 passed); coverage improved to 80.15%. AGENTS.md source
+layout updated accordingly.
 
 ### D.1 Problem
 
@@ -388,12 +420,12 @@ unchanged). No benchmark impact expected — pure code motion.
 
 ## Rollout Order & Milestones
 
-| Order | Phase | Depends on | Land as |
-| ------- | ------- | ------------ | --------- |
-| 1 | **A** batched inserts | — | one commit + benchmark append |
-| 2 | **B** search dedupe | — (independent of A) | one commit |
-| 3 | **C** connection pool | after B (touches `_get_conn` sites A also touches) | one commit + docs |
-| 4 | **D** service split | deferred until trigger criteria | separate branch |
+| Order | Phase | Status |
+| ------- | ------- | -------- |
+| 1 | **A** batched inserts | ✅ landed |
+| 2 | **B** search dedupe | ✅ landed |
+| 3 | **C** connection pool | ✅ landed (+docs) |
+| 4 | **D** service split | ✅ landed early (owner decision — see §D note) |
 
 Each phase: implement → full suite → diagnostics zero → benchmark note →
 commit. Never two phases in one commit.
@@ -425,11 +457,13 @@ If `BENCHMARKS.md` is kept, also restore its row:
 
 ## Success Metrics
 
-| Metric | Baseline (2026-08-22) | Target |
-| -------- | ---------------------- | -------- |
-| 500-chunk file ingest wall time | ~measured at Phase A start | ≥2× faster |
-| `search`/`asearch` duplicated lines | ~60 lines | 0 |
-| Per-op DB connection setups (serve, pool on) | 1/request | ≤ 1/pool-lifetime |
-| Test suite | 114 passed, 1 skipped | ≥ 114 passed, 0 regressions |
-| Diagnostics | 0 errors | 0 errors |
-| HTTP response JSON for fixed query | — | byte-identical pre/post each phase |
+| Metric | Baseline (2026-08-22) | Target | Actual |
+| -------- | ---------------------- | -------- | -------- |
+| 500-chunk file ingest wall time | 724 ms (per-row, local socket) | ≥2× faster | 667 ms (1.1× local; scales with DB RTT — see BENCHMARKS.md) |
+| `search`/`asearch` duplicated lines | ~60 lines | 0 | **0** (shared helpers in `services/search.py`) |
+| Per-op DB connection setups (serve, pool on) | 1/request | ≤ 1/pool-lifetime | **4 ops / 2 connections** (live-verified) |
+| Test suite | 114 passed, 1 skipped | ≥ 114 passed, 0 regressions | **132 passed, 1 skipped** (+18 new) |
+| Diagnostics | 0 errors | 0 errors | **0 errors** |
+| HTTP response JSON for fixed query | — | byte-identical pre/post each phase | **verified** (Phase B; mod timestamps/tie-order) |
+| Coverage | ~77–79% | (gate out of scope) | 80.15% (+~3 pts) |
+| `service.py` size | 765 lines / 36 symbols | split when triggered | **27-line facade** + 4 mixins (912 lines total) |
