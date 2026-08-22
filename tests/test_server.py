@@ -225,13 +225,23 @@ class TestWarmup:
 
     def test_warmup_statuses_without_reranker(self, svc) -> None:
         result = svc.warmup()
-        assert result == {"store": True, "db": True, "reranker": False}
+        assert result == {
+            "store": True,
+            "db": True,
+            "reranker": False,
+            "pool_prefill": True,
+        }
 
     def test_warmup_is_idempotent(self, svc) -> None:
         """Properties cache — double-warm (pre-built services) is harmless."""
         first = svc.warmup()
         second = svc.warmup()
-        assert first == second == {"store": True, "db": True, "reranker": False}
+        assert first == second == {
+            "store": True,
+            "db": True,
+            "reranker": False,
+            "pool_prefill": True,
+        }
 
     def test_warmup_makes_no_embedding_calls(self, svc) -> None:
         """PLAN.md §W.2 guarantee: warmup never contacts paid APIs.
@@ -330,3 +340,54 @@ class TestWarmup:
         finally:
             os.environ.pop("SEMSEARCH_EMBEDDING_PROVIDER__TYPE", None)
 
+
+
+class TestPoolPrefill:
+    """Phase F: warmup() pre-fills PGEngine's SQLAlchemy connection pool."""
+
+    def test_pool_prefill_fills_pool(self, svc) -> None:
+        """After warmup, >= 5 connections sit checked-in and ready."""
+        result = svc.warmup()
+        assert result["pool_prefill"] is True
+
+        sa_pool = svc.engine._pool.sync_engine.pool
+        assert sa_pool.size() == 5
+        assert sa_pool.checkedin() >= 5
+
+    def test_engine_usable_after_prefill(self, svc) -> None:
+        """Pre-filled connections are loop-affine to PGEngine's loop — reuse OK."""
+        svc.warmup()
+        stats = svc.stats()  # exercises PGEngine checkout post-prefill
+        assert "chunk_count" in stats
+
+    def test_prefill_orthogonal_to_psycopg_pool(self, pg_url) -> None:
+        """Phase C psycopg pool (enabled) and SQLAlchemy pre-fill coexist."""
+        from semsearch.config import PoolConfig
+
+        embedder = MockEmbeddings(dim=128)
+        settings = Settings(
+            database_url=pg_url,
+            collection_name="semsearch_chunks_test",
+            embedding_provider=EmbeddingProviderConfig(
+                type="openai",
+                model="text-embedding-3-small",
+                api_key=SecretStr("test-key"),
+            ),
+            reranker=None,
+            pool=PoolConfig(min_size=1, max_size=2),
+        )
+        engine = build_engine(settings)
+        init_schema(settings, engine, embedder.dim, recreate=True)
+        svc = SemanticSearchService(settings, engine, embedder)
+        try:
+            result = svc.warmup()
+            assert result["store"] is True
+            assert result["db"] is True
+            assert result["pool_prefill"] is True
+            # Both pools populated independently.
+            assert svc.engine._pool.sync_engine.pool.checkedin() >= 5
+            psycopg_pool = svc._pool
+            assert psycopg_pool is not None  # pooling enabled via PoolConfig
+            assert psycopg_pool.get_stats()["pool_available"] >= 1
+        finally:
+            svc.close()

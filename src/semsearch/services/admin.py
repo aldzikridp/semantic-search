@@ -151,11 +151,12 @@ class AdminMixin(BaseService):
         """Pre-build lazily-initialized local resources.
 
         Safe at server startup: touches ONLY local resources (PGVectorStore,
-        one DB round-trip, reranker client construction). Never contacts the
-        embedding or reranker APIs. Fail-open: logs and continues on error so
-        startup never depends on DB state or providers (PLAN.md Phase W).
+        one DB round-trip, reranker client construction, SQLAlchemy pool
+        pre-fill). Never contacts the embedding or reranker APIs. Fail-open:
+        logs and continues on error so startup never depends on DB state or
+        providers (PLAN.md Phases W and F).
         """
-        result = {"store": False, "db": False, "reranker": False}
+        result = {"store": False, "db": False, "reranker": False, "pool_prefill": False}
         try:
             _ = self.store  # build PGVectorStore
             result["store"] = True
@@ -177,6 +178,32 @@ class AdminMixin(BaseService):
                 result["reranker"] = True
             except Exception as e:
                 logger.warning("Warmup: reranker init deferred (%s)", e)
+        # Pool pre-fill (PLAN.md Phase F): open up to pool_size connections
+        # through PGEngine's underlying SQLAlchemy engine and return them, so
+        # the first concurrent burst doesn't serialize on connection setup.
+        # Must run on PGEngine's own event loop (via _run_as_sync): asyncpg
+        # connections are loop-affine, and sync_engine IO outside greenlet
+        # context fails. Fail-open like every other step.
+        try:
+            async_engine = getattr(self.engine, "_pool", None)  # AsyncEngine (private)
+            if async_engine is not None:
+                target = min(async_engine.sync_engine.pool.size(), 5)
+
+                async def _prefill() -> None:
+                    conns = []
+                    try:
+                        for _ in range(target):
+                            sa_conn = await async_engine.connect()
+                            await sa_conn.exec_driver_sql("SELECT 1")
+                            conns.append(sa_conn)
+                    finally:
+                        for sa_conn in conns:
+                            await sa_conn.close()  # returned to the pool, not closed
+
+                self.engine._run_as_sync(_prefill())
+                result["pool_prefill"] = True
+        except Exception as e:
+            logger.warning("Warmup: pool pre-fill deferred (%s)", e)
         return result
 
     # ---- Stats ----
