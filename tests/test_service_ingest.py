@@ -96,3 +96,57 @@ class TestForceReembed:
         assert result.chunks_reused == 0
         assert result.chunks_updated > 0
         assert service.embedder._call_count > initial_count
+
+
+class TestBatchedIngest:
+    """Phase A: batched multi-row INSERT for CASE B/C."""
+
+    def _count_rows_for_source(self, service, source):
+        conn = service._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {service.settings.collection_name} "
+                    f"WHERE source = %s",
+                    (source,),
+                )
+                return int(cur.fetchone()[0])
+        finally:
+            conn.close()
+
+    def test_ingest_many_chunks_single_transaction(self, service, tmp_path):
+        """Phase A: ingesting a 300+ chunk file stores every row with correct counts."""
+        file = tmp_path / "big.txt"
+        file.write_text(("chunk content " * 100 + "\n") * 400)
+        result = service.ingest(file)
+        assert result.chunks_added >= 300
+        assert result.chunks_reused == 0
+        assert result.chunks_updated == 0
+        assert self._count_rows_for_source(service, str(file)) == result.chunks_added
+
+    def test_ingest_case_bc_preserves_upsert_semantics(self, service, tmp_path):
+        """Phase A: re-ingesting a modified file updates CASE B rows, adds CASE C
+        rows, and leaves CASE A rows untouched (ON CONFLICT upsert semantics)."""
+        file = tmp_path / "upsert.txt"
+        file.write_text(("original content " * 100 + "\n") * 5)
+        first = service.ingest(file)
+        total = first.chunks_added
+
+        # Modify lines 1-2 (CASE B) and append 2 new lines (CASE C);
+        # remaining original chunks stay untouched (CASE A).
+        lines = file.read_text().split("\n")
+        for i in range(1, 3):
+            lines[i] = f"MODIFIED {i} " * 100
+        file.write_text("\n".join(lines) + ("brand new tail\n") * 2)
+
+        second = service.ingest(file)
+        assert second.chunks_updated >= 1  # CASE B
+        assert second.chunks_reused >= 1  # CASE A untouched
+        assert second.chunks_added >= 1  # CASE C new tail
+        total_after = (
+            second.chunks_reused + second.chunks_updated + second.chunks_added
+        )
+        # Overlap makes chunk boundaries shift when lines change, so exact
+        # per-case counts aren't fixed — but every chunk must be accounted for.
+        assert self._count_rows_for_source(service, str(file)) == total_after
+        assert total_after >= total

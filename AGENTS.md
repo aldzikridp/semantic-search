@@ -34,6 +34,7 @@ nix develop --command bash -c "semsearch --help"
 ### Missing Libraries
 
 If you encounter `ImportError` for `.so` files, add the missing Nix package to `flake.nix`:
+
 1. Add to `buildInputs` (e.g., `pkgs.zlib`)
 2. Add to `LD_LIBRARY_PATH` in `shellHook`
 
@@ -53,7 +54,7 @@ src/semsearch/
 ├── loaders.py        # File-type dispatch (pick_loader) + metadata injection (with_doc_type)
 ├── models.py         # Pydantic models (SearchResult, IngestResult, BatchIngestResult, DeleteResult)
 ├── reranker.py       # Generic reranker (OpenRouter, Jina, any compatible endpoint) — persistent httpx2.Client
-├── server.py         # FastAPI HTTP server (POST /search, /ingest, /ingest-dir, DELETE /delete, GET /stats, /health)
+├── server.py         # FastAPI HTTP server (GET /health, POST /search, GET /stats — read-only)
 ├── service.py        # SemanticSearchService — main orchestration layer (cached vector size)
 ├── splitter.py       # RecursiveCharacterTextSplitter wrapper
 └── store.py          # PGEngine/PGVectorStore construction + schema init (raw psycopg, HNSW config)
@@ -109,6 +110,7 @@ store.add_documents(docs)  # Row-by-row commits, re-embeds everything
 ### 2. PGVectorStore is read-only
 
 Use `PGVectorStore` ONLY for:
+
 - `similarity_search_with_score()` — search
 
 All writes (INSERT, UPDATE, DELETE) go through raw `psycopg` connections. This includes filtered deletes — build a `WHERE` clause from the filter dict instead of calling `PGVectorStore.delete()`.
@@ -189,7 +191,7 @@ if url.startswith("postgres://"):
 The project uses the best available vector index:
 
 | pgvectorscale installed? | Vector dims | Index |
-|-------------------------|-------------|-------|
+| ------------------------- | ------------- | ------- |
 | Yes | Any | DiskANN (SBQ compressed) |
 | No | ≤2000 | HNSW |
 | No | >2000 | None (sequential scan) |
@@ -199,6 +201,7 @@ vectorscale is detected, HNSW indexes are automatically upgraded to
 DiskANN on `init_schema()`.
 
 **DiskANN defaults:**
+
 - `storage_layout = memory_optimized` (SBQ compression)
 - `num_bits_per_dimension = 2` (16× compression; auto-downgrades to 1 for >900 dims)
 - `num_neighbors = 50`
@@ -242,10 +245,12 @@ semsearch -c staging.env stats
 Methods that touch the database accept an optional `conn: psycopg.Connection | None = None` parameter. When `None`, the method creates and closes its own connection. When provided, the caller owns the connection lifecycle.
 
 **Ownership rule:**
+
 - `conn=None` → method owns it (create → use → close)
 - `conn` provided → caller owns it (method uses it, never closes)
 
 **Batch pattern (`ingest_dir`):**
+
 ```python
 conn = self._get_conn()
 try:
@@ -256,8 +261,9 @@ finally:
 ```
 
 **Connection counts:**
+
 | Method | Connections |
-|--------|-------------|
+| -------- | ------------- |
 | `ingest()` standalone | 1 (merged read+write) |
 | `ingest_dir(N files)` | 1 (batch) + 1 (prune) |
 | `delete()` standalone | 1 |
@@ -269,7 +275,7 @@ finally:
 ## Provider Configuration
 
 | Type | Class | Required | Default |
-|------|-------|----------|---------|
+| ------ | ------- | ---------- | --------- |
 | `openai` | `OpenAIEmbeddings` | `api_key` | `text-embedding-3-small` |
 | `ollama` | `OllamaEmbeddings` | daemon running | `http://localhost:11434` |
 | `openrouter` | `OpenAIEmbeddings` | `api_key` | `https://openrouter.ai/api/v1` |
@@ -311,7 +317,7 @@ CREATE INDEX {table}_source_chunk_idx ON {table} (source, chunk_index);
 ### Loaders
 
 | Extension | Loader | Notes |
-|-----------|--------|-------|
+| ----------- | -------- | ------- |
 | `.txt`, `.md` | `TextLoader` | Single document |
 | `.pdf` | `PyMuPDFLoader` | One doc per page |
 | `.csv` | `CSVLoader` | One doc per row |
@@ -363,7 +369,7 @@ nix develop --command bash -c "TEST_DATABASE_URL='$TEST_DATABASE_URL' pytest -v"
 ### Test Structure
 
 | File | Tests | Coverage |
-|------|-------|----------|
+| ------ | ------- | ---------- |
 | `test_loaders.py` | 7 | Loader dispatch, metadata injection |
 | `test_embeddings.py` | 6 | Provider factory, OpenRouter routing |
 | `test_service_ingest.py` | 9 | CASE A/B/C/D, idempotency |
@@ -452,9 +458,8 @@ def pg_container():
 ## Documentation Files
 
 | File | Purpose |
-|------|---------|
+| ------ | --------- |
 | `README.md` | User-facing documentation |
 | `AGENTS.md` | This file — agent instructions |
 | `docs/` | Comprehensive documentation |
 | `docs/api-reference.md` | HTTP API reference for serve mode |
-

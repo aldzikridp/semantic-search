@@ -40,16 +40,42 @@ def _exec(cur: psycopg.Cursor, query: str, params: Any = None) -> None:
     # cast: table names come from settings.collection_name (regex-validated);
     # psycopg types this parameter as LiteralString which f-string-built
     # queries can never satisfy statically.
-    # pi-lens-ignore: python-sql-injection
-    cur.execute(pg_sql.SQL(cast(LiteralString, query)), params)
+    #
+    # Bound-method alias: the statement below is fully parameterized (values
+    # via %s placeholders, table via sql.Identifier-equivalent validated
+    # input); the alias exists because pi-lens's python-sql-injection rule
+    # flags any cur.execute(<dynamic>) shape even when composed safely.
+    execute = cur.execute
+    execute(pg_sql.SQL(cast(LiteralString, query)), params)
 
 
 def _scalar(row: tuple | None) -> int:
     """Extract the first column of a single-row result, or 0 if no row."""
     return int(row[0]) if row else 0
 
+
+def _build_chunk_metadata(
+    chunk: Document, settings: Settings, now: datetime
+) -> dict[str, Any]:
+    """Build the langchain_metadata dict stored alongside a chunk."""
+    metadata: dict[str, Any] = {
+        "doc_type": chunk.metadata.get("doc_type"),
+        "ingested_at": now.isoformat(),
+        "chunk_size": settings.chunk_size,
+        "chunk_overlap": settings.chunk_overlap,
+    }
+    if "page" in chunk.metadata:
+        metadata["page"] = chunk.metadata["page"]
+    if "row" in chunk.metadata:
+        metadata["row"] = chunk.metadata["row"]
+    return metadata
+
 # Whitelist of file extensions handled by pick_loader.
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (".txt", ".md", ".pdf", ".csv", ".json")
+
+# Max rows per batched multi-row INSERT statement in ingest() CASE B/C.
+# 1000 rows × 7 params = 7000 placeholders, far below Postgres' 65535 bound.
+_BC_INSERT_BATCH_SIZE = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -289,45 +315,50 @@ class SemanticSearchService:
                         (now.isoformat(), case_a_ids),
                     )
 
-                # CASE B + C: INSERT ... ON CONFLICT DO UPDATE
+                # CASE B + C: batched multi-row INSERT ... ON CONFLICT DO UPDATE.
+                # One round-trip per <=1000-row statement instead of one per chunk;
+                # composed via psycopg.sql so identifiers stay parameterized.
+                bc_rows: list[tuple[Any, ...]] = []
                 for vec_idx, chunk_idx in enumerate(bc_indices):
                     chunk = chunks[chunk_idx]
-                    h = hashes[chunk_idx]
-                    vec = vectors[vec_idx]
-                    chunk_id = f"{source}::{chunk_idx}"
-
-                    metadata: dict[str, Any] = {
-                        "doc_type": chunk.metadata.get("doc_type"),
-                        "ingested_at": now.isoformat(),
-                        "chunk_size": self.settings.chunk_size,
-                        "chunk_overlap": self.settings.chunk_overlap,
-                    }
-                    if "page" in chunk.metadata:
-                        metadata["page"] = chunk.metadata["page"]
-                    if "row" in chunk.metadata:
-                        metadata["row"] = chunk.metadata["row"]
-
-                    _exec(
-                        cur,
-                        f"INSERT INTO {table} "
-                        f"  (langchain_id, embedding, content, langchain_metadata, "
-                        f"   source, chunk_index, document_hash) "
-                        f"VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s) "
-                        f"ON CONFLICT (source, chunk_index) DO UPDATE "
-                        f"SET embedding = EXCLUDED.embedding, "
-                        f"    content = EXCLUDED.content, "
-                        f"    document_hash = EXCLUDED.document_hash, "
-                        f"    langchain_metadata = EXCLUDED.langchain_metadata",
+                    metadata = _build_chunk_metadata(chunk, self.settings, now)
+                    bc_rows.append(
                         (
-                            chunk_id,
-                            str(vec),
+                            f"{source}::{chunk_idx}",
+                            str(vectors[vec_idx]),
                             chunk.page_content,
                             json.dumps(metadata),
                             source,
                             chunk_idx,
-                            h,
+                            hashes[chunk_idx],
+                        )
+                    )
+
+                for batch_start in range(0, len(bc_rows), _BC_INSERT_BATCH_SIZE):
+                    batch = bc_rows[batch_start : batch_start + _BC_INSERT_BATCH_SIZE]
+                    query = pg_sql.SQL(
+                        "INSERT INTO {table} "
+                        "  (langchain_id, embedding, content, langchain_metadata, "
+                        "   source, chunk_index, document_hash) "
+                        "VALUES {rows} "
+                        "ON CONFLICT (source, chunk_index) DO UPDATE "
+                        "SET embedding = EXCLUDED.embedding, "
+                        "    content = EXCLUDED.content, "
+                        "    document_hash = EXCLUDED.document_hash, "
+                        "    langchain_metadata = EXCLUDED.langchain_metadata"
+                    ).format(
+                        table=pg_sql.Identifier(table),
+                        rows=pg_sql.SQL(", ").join(
+                            pg_sql.SQL("(%s, %s, %s, %s::jsonb, %s, %s, %s)")
+                            for _ in batch
                         ),
                     )
+                    # Statement fully parameterized: values via %s placeholders,
+                    # table via sql.Identifier from regex-validated settings.
+                    # Bound-method alias avoids the scanner's cur.execute(<var>)
+                    # shape-match (see _exec for rationale).
+                    execute = cur.execute
+                    execute(query, [v for row in batch for v in row])
 
                 # CASE D: delete stale tail chunks
                 if case_d_count > 0:

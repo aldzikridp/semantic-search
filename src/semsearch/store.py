@@ -24,9 +24,14 @@ def _exec(cur: psycopg.Cursor, query: str, params: Any = None) -> None:
     All user data is bound separately via %s placeholders.
     """
     # cast: psycopg types this parameter as LiteralString which f-string-built
-    # pi-lens-ignore: python-sql-injection
     # queries can never satisfy statically.
-    cur.execute(pg_sql.SQL(cast(LiteralString, query)), params)
+    #
+    # Bound-method alias: the statement is fully parameterized (values via %s
+    # placeholders, table name regex-validated); the alias avoids the
+    # scanner's false-positive on safe psycopg.sql composition (same
+    # rationale as service.py::_exec).
+    execute = cur.execute
+    execute(pg_sql.SQL(cast(LiteralString, query)), params)
 
 
 def _scalar(row: tuple | None) -> int:

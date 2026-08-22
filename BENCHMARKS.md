@@ -58,6 +58,7 @@ Sample queries for reproducible benchmarks.
 | Configurability | None | Full via env vars | **New capability** |
 
 **Configuration:**
+
 ```bash
 SEMSEARCH_HNSW__M=16
 SEMSEARCH_HNSW__EF_CONSTRUCTION=200
@@ -71,7 +72,7 @@ SEMSEARCH_HNSW__EF_SEARCH=80
 **Solution:** Persistent `httpx.Client` with connection pooling and exponential backoff retry for 429s.
 
 | Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
+| -------- | -------- | ------- | ------------- |
 | Reranker latency (warm) | ~200ms | ~50ms | **75% reduction** |
 | 429 handling | Immediate failure | Retry with backoff | **Resilience** |
 | Connection reuse | None | 5 keepalive connections | **Pooling** |
@@ -85,7 +86,7 @@ SEMSEARCH_HNSW__EF_SEARCH=80
 **Solution:** `semsearch serve` starts a FastAPI server with a warm `SemanticSearchService`.
 
 | Metric | Before (CLI) | After (HTTP) | Improvement |
-|--------|-------------|--------------|-------------|
+| -------- | ------------- | -------------- | ------------- |
 | Cold start (per request) | ~500ms–1.5s | 0ms (server startup) | **Eliminated** |
 | Per-request overhead | ~500ms | ~50ms | **90% reduction** |
 
@@ -157,3 +158,48 @@ Existing tests should remain unaffected:
 ```bash
 nix develop --command bash -c "pytest tests/test_service_search.py tests/test_service_ingest.py tests/test_service_delete.py tests/test_cli.py -v"
 ```
+
+---
+
+## Phase A (PLAN.md): Batched CASE B/C Inserts (2026-08-22)
+
+### Change
+
+`ingest()` CASE B/C previously executed one INSERT round-trip per changed/new
+chunk. Now rows are flushed in multi-row `INSERT ... VALUES (...), (...)`
+statements via `psycopg.sql`, batched at `_BC_INSERT_BATCH_SIZE = 1000`.
+
+### Methodology
+
+- 500-chunk generated text file (chunk_size=1000, overlap=200), fresh source
+  → all CASE C inserts inside one transaction.
+- `MockEmbeddings(dim=128)` isolates the DB write path from API latency.
+- "Before" simulated by `_BC_INSERT_BATCH_SIZE = 1` (identical per-row
+  round-trip pattern to the old loop); "after" = shipped batching.
+- Local PostgreSQL over **unix socket** (`.pgsocket`), warm connection,
+  single run after a 5-chunk warmup.
+
+### Results
+
+| Scenario | Wall time | Per chunk |
+| ---------- | ----------- | ----------- |
+| Before (per-row round-trips) | 724 ms | 1.45 ms/chunk |
+| After (1000-row batches) | 667 ms | 1.33 ms/chunk |
+| **Speedup** | **1.1×** | — |
+
+### Interpretation
+
+The gain is modest on this setup because the benchmark runs against a
+**local unix-socket PostgreSQL**, where per-round-trip cost is ~0.05 ms —
+500 round-trips ≈ only ~25–50 ms of the total. The remaining ~600+ ms is
+dominated by Python-side work (`str(vec)` serialization of 500 × 128-dim
+vectors, JSON metadata dumps), which batching does not change.
+
+Extrapolation: against a **networked PostgreSQL** (LAN ~0.2–0.5 ms or cloud
+~1 ms RTT), the same 500 round-trips cost 100–500+ ms of pure wait, so the
+relative speedup grows substantially with distance to the database. The
+batched form is strictly better everywhere and removes the round-trip count
+from the latency equation entirely.
+
+Follow-up candidate (not scheduled): reduce the now-dominant Python
+serialization cost (e.g., pgvector's binary adapter instead of `str(vec)`).
