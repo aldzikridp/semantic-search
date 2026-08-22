@@ -5,7 +5,7 @@ Part of ``semsearch.services`` (PLAN.md Phase D) — implementation detail of
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psycopg
 
@@ -15,11 +15,21 @@ from semsearch.store import init_schema
 
 from .base import BaseService, _exec, _scalar
 
+if TYPE_CHECKING:
+    from semsearch.reranker import Reranker
+
 logger = logging.getLogger(__name__)
 
 
 class AdminMixin(BaseService):
     """Schema lifecycle, dimension probing, filtered delete, and stats."""
+
+    if TYPE_CHECKING:
+        # Cross-mixin dependency: ``reranker`` is provided by SearchMixin in
+        # the composed SemanticSearchService facade. Declared here (types
+        # only, erased at runtime) so warmup() type-checks standalone.
+        @property
+        def reranker(self) -> "Reranker | None": ...
 
     # ---- Schema ----
 
@@ -134,6 +144,40 @@ class AdminMixin(BaseService):
         finally:
             if owns_conn:
                 self._release_conn(conn)
+
+    # ---- Warmup ----
+
+    def warmup(self) -> dict[str, bool]:
+        """Pre-build lazily-initialized local resources.
+
+        Safe at server startup: touches ONLY local resources (PGVectorStore,
+        one DB round-trip, reranker client construction). Never contacts the
+        embedding or reranker APIs. Fail-open: logs and continues on error so
+        startup never depends on DB state or providers (PLAN.md Phase W).
+        """
+        result = {"store": False, "db": False, "reranker": False}
+        try:
+            _ = self.store  # build PGVectorStore
+            result["store"] = True
+        except Exception as e:
+            logger.warning("Warmup: store init deferred (%s)", e)
+        try:
+            conn = self._get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                result["db"] = True
+            finally:
+                self._release_conn(conn)
+        except Exception as e:
+            logger.warning("Warmup: DB round-trip deferred (%s)", e)
+        if self.settings.reranker is not None:
+            try:
+                _ = self.reranker  # construct client (no request sent)
+                result["reranker"] = True
+            except Exception as e:
+                logger.warning("Warmup: reranker init deferred (%s)", e)
+        return result
 
     # ---- Stats ----
 

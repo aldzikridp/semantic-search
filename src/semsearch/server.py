@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 import traceback
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -31,6 +32,7 @@ logger = logging.getLogger("semsearch.server")
 # ---------------------------------------------------------------------------
 
 
+# pi-lens-ignore: misc
 class SearchRequest(BaseModel):
     query: str
     k: int = 5
@@ -63,10 +65,14 @@ def create_app(
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         svc = service or SemanticSearchService.from_settings(settings)
         app.state.service = svc
-        logger.info("Semsearch service started")
+        # Warm local resources only — never touches paid APIs, so startup
+        # stays available even when providers are down (PLAN.md Phase W).
+        # Fail-open: warmup logs and continues on error.
+        warm = await asyncio.to_thread(svc.warmup)
+        logger.info("Semsearch service started (warmup: %s)", warm)
         yield
         # Only close if we created it (caller owns pre-built services)
         if service is None:
@@ -87,13 +93,15 @@ def create_app(
     # ---- Health ----
 
     @app.get("/health")
-    async def health():
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     # ---- Search ----
 
     @app.post("/search")
-    async def search(req: SearchRequest, request: Request):
+    async def search(
+        req: SearchRequest, request: Request
+    ) -> dict[str, Any]:
         svc = _get_svc(request)
         start_time = time.monotonic()
         try:
@@ -138,7 +146,7 @@ def create_app(
     # ---- Stats ----
 
     @app.get("/stats")
-    async def stats(request: Request):
+    async def stats(request: Request) -> dict[str, Any]:
         svc = _get_svc(request)
         try:
             # Run sync service method in thread pool

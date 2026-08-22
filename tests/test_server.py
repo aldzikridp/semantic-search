@@ -15,7 +15,7 @@ try:
 except ImportError:
     from httpx import ASGITransport, AsyncClient
 
-from semsearch.config import Settings, EmbeddingProviderConfig
+from semsearch.config import Settings, EmbeddingProviderConfig, RerankerProviderConfig
 from semsearch.server import create_app
 from semsearch.service import SemanticSearchService
 from semsearch.store import build_engine, init_schema
@@ -71,8 +71,10 @@ def app(svc, pg_url):
 @pytest.fixture
 async def client(app):
     """Async HTTP client for testing the app."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    # pi-lens-ignore: reportArgumentType (httpx2/httpx union vs AsyncBaseTransport;
+    # structurally compatible at runtime)
+    transport = ASGITransport(app=app)  # type: ignore[arg-type]
+    async with AsyncClient(transport=transport, base_url="http://test") as c:  # type: ignore[arg-type]
         yield c
 
 
@@ -143,8 +145,8 @@ class TestSearch:
         )
         app = create_app(settings, service=svc)
         app.state.service = svc
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        transport = ASGITransport(app=app)  # type: ignore[arg-type]
+        async with AsyncClient(transport=transport, base_url="http://test") as client:  # type: ignore[arg-type]
             r = await client.post("/search", json={"query": "hello world", "k": 2, "rerank": True})
             assert r.status_code == 200
             data = r.json()
@@ -211,3 +213,120 @@ class TestDocs:
         data = r.json()
         assert "openapi" in data
         assert data["info"]["title"] == "semsearch"
+
+
+# ------------------------------------------------------------------
+# Warmup (PLAN.md Phase W)
+# ------------------------------------------------------------------
+
+
+class TestWarmup:
+    """warmup() pre-builds lazy local resources; fail-open, no paid-API calls."""
+
+    def test_warmup_statuses_without_reranker(self, svc) -> None:
+        result = svc.warmup()
+        assert result == {"store": True, "db": True, "reranker": False}
+
+    def test_warmup_is_idempotent(self, svc) -> None:
+        """Properties cache — double-warm (pre-built services) is harmless."""
+        first = svc.warmup()
+        second = svc.warmup()
+        assert first == second == {"store": True, "db": True, "reranker": False}
+
+    def test_warmup_makes_no_embedding_calls(self, svc) -> None:
+        """PLAN.md §W.2 guarantee: warmup never contacts paid APIs.
+
+        Regression guard for the availability-coupling rejection: startup
+        must not depend on (or spend money at) the embedding provider.
+        """
+        result = svc.warmup()
+        assert result["store"] and result["db"]
+        assert svc.embedder._call_count == 0
+
+    def test_warmup_with_reranker_configured(self, pg_url) -> None:
+        from semsearch.reranker import Reranker
+
+        embedder = MockEmbeddings(dim=128)
+        settings = Settings(
+            database_url=pg_url,
+            collection_name="semsearch_chunks_test",
+            embedding_provider=EmbeddingProviderConfig(
+                type="openai",
+                model="text-embedding-3-small",
+                api_key=SecretStr("test-key"),
+            ),
+            reranker=RerankerProviderConfig(
+                base_url="https://example.com/rerank",
+                model="test-rerank-model",
+                api_key=SecretStr("test-key"),
+            ),
+        )
+        engine = build_engine(settings)
+        svc = SemanticSearchService(settings, engine, embedder)
+        try:
+            result = svc.warmup()
+            assert result["reranker"] is True
+            assert isinstance(svc._reranker, Reranker)
+        finally:
+            svc.close()
+
+    def test_warmup_fail_open_on_missing_table(self, pg_url) -> None:
+        """Bogus collection_name → store step deferred, DB step OK, no raise."""
+        embedder = MockEmbeddings(dim=128)
+        settings = Settings(
+            database_url=pg_url,
+            collection_name="no_such_table_warmup_check",
+            embedding_provider=EmbeddingProviderConfig(
+                type="openai",
+                model="text-embedding-3-small",
+                api_key=SecretStr("test-key"),
+            ),
+            reranker=None,
+        )
+        engine = build_engine(settings)
+        svc = SemanticSearchService(settings, engine, embedder)
+        try:
+            result = svc.warmup()
+            assert result["store"] is False
+            assert result["db"] is True  # SELECT 1 is table-independent
+        finally:
+            svc.close()
+
+    def test_lifespan_warms_up_and_health_ok(self, pg_url, caplog) -> None:
+        """Startup runs warmup; /health responds even with unreachable provider.
+
+        Negative proof (PLAN.md verification 5): the OpenAI endpoint is never
+        contacted at startup — a dummy key and unreachable provider don't
+        block startup or /health.
+        """
+        import logging
+        import os
+
+        from fastapi.testclient import TestClient
+
+        # Point the provider at a surely-dead endpoint to prove no API call.
+        os.environ["SEMSEARCH_EMBEDDING_PROVIDER__TYPE"] = "openai_compatible"
+        try:
+            settings = Settings(
+                database_url=pg_url,
+                collection_name="semsearch_chunks_test",
+                embedding_provider=EmbeddingProviderConfig(
+                    type="openai_compatible",
+                    model="test-model",
+                    api_key=SecretStr("dummy"),
+                    base_url="http://127.0.0.1:1/v1",  # nothing listens here
+                ),
+                reranker=None,
+            )
+            app = create_app(settings)
+            with caplog.at_level(logging.INFO, logger="semsearch.server"):
+                with TestClient(app) as client:
+                    assert client.get("/health").status_code == 200
+                    svc = app.state.service
+                    assert svc._store is not None  # warmed at startup
+            warm_logs = [r for r in caplog.records if "warmup" in r.getMessage()]
+            assert warm_logs, "expected a warmup log line at startup"
+            # Service is closed by lifespan shutdown.
+        finally:
+            os.environ.pop("SEMSEARCH_EMBEDDING_PROVIDER__TYPE", None)
+

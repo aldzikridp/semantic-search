@@ -8,6 +8,12 @@ The `semsearch serve` command starts a FastAPI HTTP server that keeps the
 `SemanticSearchService` warm between requests, eliminating cold-start overhead
 for AI agent tool calling.
 
+**Startup warmup:** at startup the server pre-builds lazily-initialized local
+resources (PGVectorStore, one DB round-trip, reranker client construction) so
+the first request skips local lazy-init. Warmup **never contacts the embedding
+or reranker APIs** — startup stays available even when providers are down
+(fail-open: failures are logged and deferred to the first real request).
+
 ```bash
 semsearch serve --host 0.0.0.0 --port 8383 --log-level info
 ```
