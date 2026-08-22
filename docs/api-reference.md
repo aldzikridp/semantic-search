@@ -20,6 +20,24 @@ semsearch serve --host 0.0.0.0 --port 8383 --log-level info
 http://localhost:8383
 ```
 
+### Unix Domain Socket Mode
+
+Start the server with `--uds` to listen on a Unix socket instead of TCP:
+
+```bash
+semsearch serve --uds ./semsearch.sock
+```
+
+All endpoints work identically. Call them with curl's `--unix-socket` flag
+(path part is ignored, use any hostname):
+
+```bash
+curl --unix-socket ./semsearch.sock http://localhost/health
+curl --unix-socket ./semsearch.sock -X POST http://localhost/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how to deploy", "k": 3}'
+```
+
 ## Endpoints
 
 ### Health Check
@@ -31,6 +49,7 @@ GET /health
 ```
 
 **Response:**
+
 ```json
 {
   "status": "ok"
@@ -38,6 +57,7 @@ GET /health
 ```
 
 **Example:**
+
 ```bash
 curl http://localhost:8383/health
 ```
@@ -53,6 +73,7 @@ POST /search
 ```
 
 **Request Body:**
+
 ```json
 {
   "query": "how to deploy",
@@ -63,13 +84,14 @@ POST /search
 ```
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| ------- | ------ | --------- | ------------- |
 | `query` | string | *required* | Search query text |
 | `k` | integer | `5` | Number of results to return (1–50) |
 | `filter` | object | `null` | Filter criteria (see Filter Syntax) |
 | `rerank` | boolean | `false` | Enable reranking for better precision |
 
 **Response:**
+
 ```json
 {
   "query": "how to deploy",
@@ -102,7 +124,7 @@ POST /search
 **Result Fields:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `id` | string | Chunk ID (`{source}::{chunk_index}`) |
 | `content` | string | Chunk text content |
 | `score` | float | Cosine similarity score (0–1, higher = better) |
@@ -135,7 +157,7 @@ curl -X POST http://localhost:8383/search \
 **Error Responses:**
 
 | Status | Cause | Example |
-|--------|-------|---------|
+| -------- | ------- | --------- |
 | 422 | Invalid `k` value | `{"detail": "k must be between 1 and 50, got 0"}` |
 | 422 | Missing `query` | `{"detail": "... validation error ..."}` |
 | 500 | Reranker not configured | `{"detail": "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL..."}` |
@@ -152,6 +174,7 @@ GET /stats
 ```
 
 **Response:**
+
 ```json
 {
   "table": "semsearch_chunks",
@@ -170,7 +193,7 @@ GET /stats
 **Response Fields:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `table` | string | Database table name |
 | `embedding_provider` | string | Active embedding provider |
 | `embedding_dim` | integer | Vector dimensions |
@@ -179,6 +202,7 @@ GET /stats
 | `sources_by_count` | array | Top 20 sources by chunk count |
 
 **Example:**
+
 ```bash
 curl http://localhost:8383/stats
 ```
@@ -203,7 +227,7 @@ to the `langchain_metadata` JSONB column.
 ### Comparison Operators
 
 | Operator | Example | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `$eq` | `{"doc_type": {"$eq": "pdf"}}` | Equal (default) |
 | `$ne` | `{"doc_type": {"$ne": "json"}}` | Not equal |
 | `$gt` | `{"page": {"$gt": 5}}` | Greater than |
@@ -258,6 +282,7 @@ When `rerank: true`, the search process:
 3. Returns top-k results with `rerank_score` in metadata
 
 **Configuration:**
+
 ```bash
 SEMSEARCH_RERANKER__BASE_URL=https://openrouter.ai/api/v1/rerank
 SEMSEARCH_RERANKER__MODEL=cohere/rerank-v3.5
@@ -265,6 +290,7 @@ SEMSEARCH_RERANKER__API_KEY=sk-or-v1-...
 ```
 
 **Response with reranking:**
+
 ```json
 {
   "reranked": true,
@@ -292,7 +318,7 @@ All errors return JSON with a `detail` field:
 ```
 
 | Status Code | Description |
-|-------------|-------------|
+| ------------- | ------------- |
 | 200 | Success |
 | 422 | Validation error (bad request body) |
 | 500 | Server error (search failed, reranker not configured, etc.) |
@@ -411,13 +437,14 @@ search "deployment guide" 5
 ## Performance Notes
 
 | Metric | Typical Value |
-|--------|---------------|
+| -------- | --------------- |
 | Cold start (first request) | ~2–5s (model loading) |
 | Warm request (no rerank) | 50–200ms |
 | Warm request (with rerank) | 100–500ms |
 | Stats endpoint | 5–50ms |
 
 **Timeouts:**
+
 - Embedding API: 10s (configurable via `SEMSEARCH_TIMEOUT__EMBEDDING`)
 - Database: 10s (configurable via `SEMSEARCH_TIMEOUT__DB_CONNECT`)
 - Reranker: 10s (configurable via `SEMSEARCH_RERANKER__TIMEOUT`)

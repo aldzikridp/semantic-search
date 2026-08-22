@@ -45,7 +45,7 @@ semsearch ingest <path> [--force] [--provider TYPE] [--provider-model MODEL] [--
 ```
 
 | Argument/Flag | Description |
-|---------------|-------------|
+| --------------- | ------------- |
 | `path` | File to ingest (required) |
 | `--force` | Force re-embed all chunks (bypass cache) |
 | `--provider` | Override provider type |
@@ -88,7 +88,7 @@ semsearch ingest docs/readme.md \
 **Cases:**
 
 | Case | Meaning |
-|------|---------|
+| ------ | --------- |
 | `chunks_added` | New chunks embedded |
 | `chunks_reused` | Unchanged chunks (no API call) |
 | `chunks_updated` | Changed chunks re-embedded |
@@ -105,7 +105,7 @@ semsearch ingest-dir <dir_path> [OPTIONS]
 ```
 
 | Option | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `dir_path` | Directory to walk (required) |
 | `--glob PATTERN` | Glob pattern (default: `**/*`) |
 | `--exclude PATTERN` | fnmatch patterns to skip (repeatable) |
@@ -171,7 +171,7 @@ semsearch search <query> [--k N] [--filter JSON] [--rerank]
 ```
 
 | Argument/Option | Description |
-|-----------------|-------------|
+| ----------------- | ------------- |
 | `query` | Search query (required) |
 | `--k N` | Top-k results (default: 5) |
 | `--filter JSON` | PGVectorStore filter dict |
@@ -201,7 +201,7 @@ semsearch search "test" --filter '{"$and": [{"doc_type": "text"}, {"source": {"$
 **Filter Operators:**
 
 | Operator | Example |
-|----------|---------|
+| ---------- | --------- |
 | Exact match | `{"source": "docs/file.pdf"}` |
 | `$ilike` | `{"source": {"$ilike": "docs/%"}}` |
 | `$eq` | `{"doc_type": {"$eq": "pdf"}}` |
@@ -251,7 +251,7 @@ semsearch delete [--filter JSON] [--all] [--yes]
 ```
 
 | Option | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `--filter JSON` | Filter dict (same syntax as search) |
 | `--all` | Delete everything |
 | `--yes` | Confirm `--all` |
@@ -345,13 +345,14 @@ semsearch reingest docs/readme.md
 Start the HTTP server. Keeps the service warm between requests, eliminating cold-start overhead for AI agent tool calling.
 
 ```bash
-semsearch serve [--host HOST] [--port PORT]
+semsearch serve [--host HOST] [--port PORT] [--uds PATH]
 ```
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | `--host` | `0.0.0.0` | Bind host |
 | `--port` | `8383` | Bind port |
+| `--uds` | — | Bind to a Unix domain socket instead of TCP (e.g. `./semsearch.sock`) |
 
 **Examples:**
 
@@ -361,18 +362,26 @@ semsearch serve
 
 # Custom host and port
 semsearch serve --host 127.0.0.1 --port 9000
+
+# Unix domain socket (no TCP exposure; ideal for local AI agents)
+semsearch serve --uds ./semsearch.sock
+curl --unix-socket ./semsearch.sock http://localhost/health
 ```
+
+When `--uds` is set, `--host`/`--port` are ignored. The socket file is
+removed automatically when the server shuts down.
 
 **Endpoints:**
 
 | Method | Path | Description |
-|--------|------|-------------|
+| -------- | ------ | ------------- |
 | `GET` | `/health` | Health check |
 | `POST` | `/search` | Similarity search (supports `rerank`) |
 | `GET` | `/stats` | Table statistics |
 | `GET` | `/docs` | OpenAPI documentation |
 
 **Note:** The server is read-only. Use CLI commands for data modification:
+
 ```bash
 semsearch ingest <file>       # Ingest single file
 semsearch ingest-dir <dir>    # Ingest directory
@@ -476,6 +485,7 @@ semsearch -c /path/to/config.env stats
 ```
 
 **Notes:**
+
 - File must exist (error if not found)
 - Environment variables override config file values
 - If not specified, uses `.env` in current directory

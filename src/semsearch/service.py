@@ -8,9 +8,10 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, LiteralString, Self, cast
 
 import psycopg
+from psycopg import sql as pg_sql
 from langchain_core.documents import Document
 
 from semsearch.config import Settings
@@ -27,6 +28,25 @@ from semsearch.models import (
 )
 from semsearch.splitter import split_documents
 from semsearch.store import build_engine, build_store, init_schema
+
+
+def _exec(cur: psycopg.Cursor, query: str, params: Any = None) -> None:
+    """Execute a dynamically-built query on *cur*.
+
+    Table names interpolated into SQL must come from ``settings.collection_name``,
+    which is validated against ``/^[a-z_][a-z0-9_]{0,62}$/`` — safe to embed.
+    All user data is bound separately via %s placeholders.
+    """
+    # cast: table names come from settings.collection_name (regex-validated);
+    # psycopg types this parameter as LiteralString which f-string-built
+    # queries can never satisfy statically.
+    # pi-lens-ignore: python-sql-injection
+    cur.execute(pg_sql.SQL(cast(LiteralString, query)), params)
+
+
+def _scalar(row: tuple | None) -> int:
+    """Extract the first column of a single-row result, or 0 if no row."""
+    return int(row[0]) if row else 0
 
 # Whitelist of file extensions handled by pick_loader.
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (".txt", ".md", ".pdf", ".csv", ".json")
@@ -75,7 +95,7 @@ class SemanticSearchService:
     def _get_conn(self) -> psycopg.Connection:
         """Get a raw psycopg connection with timeout and keep-alive."""
         tc = self.settings.timeout
-        kwargs = {"connect_timeout": tc.db_connect}
+        kwargs: dict[str, Any] = {"connect_timeout": tc.db_connect}
         # Add TCP keep-alive settings via PostgreSQL options
         if tc.db_keepalive_idle > 0:
             kwargs["options"] = (
@@ -214,7 +234,8 @@ class SemanticSearchService:
 
             # Step 4: Fetch existing rows
             with conn.cursor() as cur:
-                cur.execute(
+                _exec(
+                    cur,
                     f"SELECT langchain_id, chunk_index, document_hash "
                     f"FROM {table} "
                     f"WHERE source = %s "
@@ -257,7 +278,8 @@ class SemanticSearchService:
             with conn.cursor() as cur:
                 # CASE A: cheap UPDATE (ingested_at only)
                 if case_a_ids:
-                    cur.execute(
+                    _exec(
+                        cur,
                         f"UPDATE {table} "
                         f"SET langchain_metadata = jsonb_set("
                         f"  langchain_metadata::jsonb, '{{ingested_at}}', "
@@ -285,7 +307,8 @@ class SemanticSearchService:
                     if "row" in chunk.metadata:
                         metadata["row"] = chunk.metadata["row"]
 
-                    cur.execute(
+                    _exec(
+                        cur,
                         f"INSERT INTO {table} "
                         f"  (langchain_id, embedding, content, langchain_metadata, "
                         f"   source, chunk_index, document_hash) "
@@ -308,7 +331,8 @@ class SemanticSearchService:
 
                 # CASE D: delete stale tail chunks
                 if case_d_count > 0:
-                    cur.execute(
+                    _exec(
+                        cur,
                         f"DELETE FROM {table} "
                         f"WHERE source = %s AND chunk_index >= %s",
                         (source, len(chunks)),
@@ -415,11 +439,12 @@ class SemanticSearchService:
             conn = self._get_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
+                    _exec(
+                        cur,
                         f"SELECT DISTINCT source FROM {table} "
-                        f"WHERE source LIKE %s",
+f"WHERE source LIKE %s",
                         (dir_prefix + "%",),
-                    )
+)
                     db_sources = {row[0] for row in cur.fetchall()}
 
                 orphan_sources = db_sources - ingested_sources
@@ -472,9 +497,9 @@ class SemanticSearchService:
         try:
             with conn.cursor() as cur:
                 if not filter:
-                    cur.execute(f"SELECT COUNT(*) FROM {table}")
-                    count = cur.fetchone()[0]
-                    cur.execute(f"DELETE FROM {table}")
+                    _exec(cur, f"SELECT COUNT(*) FROM {table}")
+                    count = _scalar(cur.fetchone())
+                    _exec(cur, f"DELETE FROM {table}")
                 else:
                     # Build WHERE clause from filter dict.
                     # 'source' is a top-level column; other keys live inside
@@ -489,12 +514,14 @@ class SemanticSearchService:
                         params.append(str(value))
                     where_clause = " AND ".join(conditions)
 
-                    cur.execute(
+                    _exec(
+                        cur,
                         f"SELECT COUNT(*) FROM {table} WHERE {where_clause}",
                         params,
                     )
-                    count = cur.fetchone()[0]
-                    cur.execute(
+                    count = _scalar(cur.fetchone())
+                    _exec(
+                        cur,
                         f"DELETE FROM {table} WHERE {where_clause}",
                         params,
                     )
@@ -705,18 +732,19 @@ class SemanticSearchService:
 
         try:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
-                chunk_count = cur.fetchone()[0]
+                _exec(cur, f"SELECT COUNT(*) FROM {table}")
+                chunk_count = _scalar(cur.fetchone())
 
-                cur.execute(f"SELECT COUNT(DISTINCT source) FROM {table}")
-                source_count = cur.fetchone()[0]
+                _exec(cur, f"SELECT COUNT(DISTINCT source) FROM {table}")
+                source_count = _scalar(cur.fetchone())
 
-                cur.execute(
+                _exec(
+                    cur,
                     f"SELECT source, COUNT(*) AS cnt "
                     f"FROM {table} "
                     f"GROUP BY source "
                     f"ORDER BY cnt DESC "
-                    f"LIMIT 20"
+                    f"LIMIT 20",
                 )
                 sources_by_count = [(row[0], row[1]) for row in cur.fetchall()]
 

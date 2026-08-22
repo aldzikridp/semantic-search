@@ -23,7 +23,7 @@ _config_path: Path | None = None
 
 
 @app.callback(invoke_without_command=True)
-def main(
+def _config_callback(
     config: Optional[Path] = typer.Option(
         None,
         "--config",
@@ -209,10 +209,17 @@ def version() -> None:
 def serve(
     host: str = typer.Option("0.0.0.0", help="Bind host"),
     port: int = typer.Option(8383, help="Bind port"),
+    uds: Optional[Path] = typer.Option(
+        None,
+        "--uds",
+        help="Bind to a Unix domain socket instead of TCP (e.g. ./semsearch.sock)",
+    ),
     log_level: str = typer.Option("info", help="Log level (debug, info, warning, error)"),
 ) -> None:
     """Start the HTTP server (keeps service warm between requests)."""
     import logging
+    import os
+    import signal
     import uvicorn
     from semsearch.server import create_app
 
@@ -253,13 +260,42 @@ def serve(
 
     settings = get_settings(_config_path)
     application = create_app(settings)
-    uvicorn.run(
-        application,
-        host=host,
-        port=port,
-        log_level=log_level,
-        log_config=log_config,
+
+    # Unix domain socket mode: host/port are ignored when uds is set.
+    bind_kwargs: dict = (
+        {"uds": str(uds)} if uds else {"host": host, "port": port}
     )
+
+    def _unlink_socket_on_signal(signum: int, frame: object) -> None:
+        """Signal handler that removes the UDS file, then dies like uvicorn would.
+
+        Uvicorn gracefully shut downs on SIGTERM/SIGINT but afterwards re-raises
+        the captured signal with the default handler restored, killing the
+        process before any code after ``uvicorn.run()`` can execute. Installing
+        this handler FIRST means uvicorn treats it as the "original" handler,
+        restores it, and re-raises into it — giving us a chance to clean up.
+        """
+        if uds:
+            uds.unlink(missing_ok=True)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    if uds:
+        signal.signal(signal.SIGTERM, _unlink_socket_on_signal)
+        signal.signal(signal.SIGINT, _unlink_socket_on_signal)
+
+    try:
+        uvicorn.run(
+            application,
+            **bind_kwargs,
+            log_level=log_level,
+            log_config=log_config,
+        )
+    finally:
+        # Covers non-signal exits (exceptions, etc.). Signal exits are handled
+        # by _unlink_socket_on_signal above.
+        if uds:
+            uds.unlink(missing_ok=True)
 
 
 def main() -> None:

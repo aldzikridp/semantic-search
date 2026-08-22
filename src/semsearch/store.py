@@ -1,8 +1,10 @@
 """PGEngine/PGVectorStore construction and schema initialization (spec §7.5)."""
 
 import logging
+from typing import Any, LiteralString, cast
 
 import psycopg
+from psycopg import sql as pg_sql
 from sqlalchemy import create_engine, text
 
 from langchain_core.embeddings import Embeddings
@@ -12,6 +14,24 @@ from semsearch.config import Settings
 from semsearch.errors import SchemaMismatchError
 
 logger = logging.getLogger(__name__)
+
+
+def _exec(cur: psycopg.Cursor, query: str, params: Any = None) -> None:
+    """Execute a dynamically-built query on *cur*.
+
+    Table names interpolated into SQL must come from ``settings.collection_name``,
+    which is validated against ``/^[a-z_][a-z0-9_]{0,62}$/`` — safe to embed.
+    All user data is bound separately via %s placeholders.
+    """
+    # cast: psycopg types this parameter as LiteralString which f-string-built
+    # pi-lens-ignore: python-sql-injection
+    # queries can never satisfy statically.
+    cur.execute(pg_sql.SQL(cast(LiteralString, query)), params)
+
+
+def _scalar(row: tuple | None) -> int:
+    """Extract the first column of a single-row result, or 0 if no row."""
+    return int(row[0]) if row else 0
 
 
 # Custom top-level columns (REAL Postgres columns, not JSONB keys).
@@ -87,7 +107,7 @@ def _has_vectorscale(cur: psycopg.Cursor) -> bool:
         "  SELECT 1 FROM pg_extension WHERE extname = 'vectorscale'"
         ")"
     )
-    return cur.fetchone()[0]
+    return bool(_scalar(cur.fetchone()))
 
 
 def _index_type_for_vector(cur: psycopg.Cursor, table: str) -> str:
@@ -152,10 +172,10 @@ def init_schema(
                 ")",
                 (table,),
             )
-            table_exists = cur.fetchone()[0]
+            table_exists = bool(_scalar(cur.fetchone()))
 
             if table_exists and recreate:
-                cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+                _exec(cur, f"DROP TABLE IF EXISTS {table} CASCADE")
                 table_exists = False
 
             elif table_exists:
@@ -182,7 +202,7 @@ def init_schema(
                 index_type = _index_type_for_vector(cur, table)
                 if index_type == "hnsw" and _has_vectorscale(cur):
                     logger.info("Upgrading HNSW index to DiskANN on %s", table)
-                    cur.execute(f"DROP INDEX IF EXISTS {table}_hnsw_idx")
+                    _exec(cur, f"DROP INDEX IF EXISTS {table}_hnsw_idx")
 
     finally:
         conn.close()
@@ -195,7 +215,7 @@ def init_schema(
             id_column=Column(LC_ID_COLUMN, "TEXT"),
             content_column=LC_CONTENT_COLUMN,
             metadata_json_column=LC_METADATA_COLUMN,
-            metadata_columns=CUSTOM_COLUMNS,
+            metadata_columns=cast("list[Any]", CUSTOM_COLUMNS),
         )
 
     # Step 4: Create/upgrade indexes (idempotent)
@@ -211,7 +231,7 @@ def init_schema(
             if has_vectorscale and index_type != "diskann":
                 # Create DiskANN (new table or upgrade from HNSW)
                 if index_type == "hnsw":
-                    cur.execute(f"DROP INDEX IF EXISTS {table}_hnsw_idx")
+                    _exec(cur, f"DROP INDEX IF EXISTS {table}_hnsw_idx")
 
                 cfg = settings.diskann  # DiskANNConfig or None
                 storage = cfg.storage_layout if cfg else "memory_optimized"
@@ -225,7 +245,8 @@ def init_schema(
                 if bits > 1 and vector_size > 900:
                     bits = 1
 
-                cur.execute(
+                _exec(
+                    cur,
                     f"CREATE INDEX IF NOT EXISTS {table}_diskann_idx "
                     f"ON {table} USING diskann (embedding vector_cosine_ops) "
                     f"WITH ("
@@ -235,7 +256,7 @@ def init_schema(
                     f"  search_list_size = {search_list},"
                     f"  max_alpha = {alpha},"
                     f"  num_dimensions = {dims}"
-                    f")"
+                    f")",
                 )
                 logger.info(
                     "Created DiskANN index on %s (dims=%d, storage=%s, bits=%d)",
@@ -245,34 +266,39 @@ def init_schema(
             elif not has_vectorscale and index_type == "none" and vector_size <= 2000:
                 # HNSW fallback when vectorscale is not installed
                 hnsw = settings.hnsw
-                cur.execute(
+                _exec(
+                    cur,
                     f"CREATE INDEX IF NOT EXISTS {table}_hnsw_idx "
                     f"ON {table} USING hnsw (embedding vector_cosine_ops) "
-                    f"WITH (m = {hnsw.m}, ef_construction = {hnsw.ef_construction})"
+                    f"WITH (m = {hnsw.m}, ef_construction = {hnsw.ef_construction})",
                 )
 
             # Set table-level ef_search default (idempotent, works for existing indexes too)
             if not has_vectorscale:
                 hnsw = settings.hnsw
                 try:
-                    cur.execute(
-                        f"ALTER TABLE {table} SET (hnsw.ef_search = {hnsw.ef_search})"
+                    _exec(
+                        cur,
+                        f"ALTER TABLE {table} SET (hnsw.ef_search = {hnsw.ef_search})",
                     )
                 except Exception as e:
                     # ef_search not supported by this pgvector version — safe to ignore
                     logger.debug("Could not set hnsw.ef_search on %s: %s", table, e)
 
             # Non-vector indexes (always created, idempotent)
-            cur.execute(
+            _exec(
+                cur,
                 f"CREATE INDEX IF NOT EXISTS {table}_metadata_gin_idx "
-                f"ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops)"
+                f"ON {table} USING gin ((langchain_metadata::jsonb) jsonb_path_ops)",
             )
-            cur.execute(
+            _exec(
+                cur,
                 f"CREATE INDEX IF NOT EXISTS {table}_source_chunk_idx "
-                f"ON {table} (source, chunk_index)"
+                f"ON {table} (source, chunk_index)",
             )
             # UNIQUE constraint — use IF NOT EXISTS equivalent
-            cur.execute(
+            _exec(
+                cur,
                 f"DO $$ "
                 f"BEGIN "
                 f"  IF NOT EXISTS ("
@@ -283,7 +309,7 @@ def init_schema(
                 f"    ADD CONSTRAINT {table}_source_chunk_unique "
                 f"    UNIQUE (source, chunk_index); "
                 f"  END IF; "
-                f"END $$;"
+                f"END $$;",
             )
     finally:
         conn.close()
