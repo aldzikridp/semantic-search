@@ -1,7 +1,5 @@
 """Exception hierarchy for semsearch (spec §7.7)."""
 
-from __future__ import annotations
-
 
 class SemSearchError(Exception):
     """Base class for all semsearch errors."""

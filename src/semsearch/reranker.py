@@ -8,11 +8,9 @@ Response:
     {"results": [{"index": 0, "relevance_score": 0.95}, ...]}
 """
 
-from __future__ import annotations
-
 import logging
 import time
-from typing import Any
+from typing import Any, Self
 
 from langchain_core.documents import Document
 from pydantic import SecretStr
@@ -88,7 +86,7 @@ class Reranker:
         """Close the underlying HTTP client and release connections."""
         self._client.close()
 
-    def __enter__(self) -> Reranker:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: Any) -> None:

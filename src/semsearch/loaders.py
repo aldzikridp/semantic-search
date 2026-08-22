@@ -1,7 +1,5 @@
 """File-type dispatch and metadata injection (spec §7.3)."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Callable
 

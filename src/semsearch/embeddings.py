@@ -1,8 +1,8 @@
 """Provider-dispatch factory for LangChain Embeddings (spec §7.2)."""
 
-from __future__ import annotations
-
 import logging
+
+from langchain_core.embeddings import Embeddings
 from pydantic import SecretStr
 
 from semsearch.config import EmbeddingProviderConfig, Settings
@@ -95,7 +95,7 @@ def _make_openai_clients(
     return sync_client.embeddings, async_client.embeddings
 
 
-def build_embedder(settings: Settings) -> "Embeddings":
+def build_embedder(settings: Settings) -> Embeddings:
     """Return a LangChain Embeddings instance based on settings.embedding_provider.
 
     Single-provider design: no runtime cascade across providers. Fallback only
@@ -111,11 +111,11 @@ def build_embedder(settings: Settings) -> "Embeddings":
     timeout = settings.timeout.embedding
 
     if cfg.type == "openai":
-        _require(cfg.api_key, "openai")
+        api_key = _require(cfg.api_key, "openai")
         from langchain_openai import OpenAIEmbeddings
 
         sync_client, async_client = _make_openai_clients(
-            api_key=cfg.api_key.get_secret_value(),
+            api_key=api_key.get_secret_value(),
             timeout=timeout,
         )
         return OpenAIEmbeddings(
@@ -210,7 +210,8 @@ def _build_openrouter_routing(cfg: EmbeddingProviderConfig) -> dict:
     return {"provider": provider_body} if provider_body else {}
 
 
-def _require(secret: SecretStr | None, name: str) -> None:
-    """Raise ProviderConfigError if secret is None or empty."""
+def _require(secret: SecretStr | None, name: str) -> SecretStr:
+    """Return the secret if present and non-empty, else raise ProviderConfigError."""
     if not secret or not secret.get_secret_value():
         raise ProviderConfigError(f"provider {name!r} requires api_key")
+    return secret

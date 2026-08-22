@@ -1,7 +1,5 @@
 """Pydantic models for the public API contract (spec §7.1)."""
 
-from __future__ import annotations
-
 from datetime import datetime
 from typing import Any
 

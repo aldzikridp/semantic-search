@@ -1,7 +1,5 @@
 """Thin wrapper around RecursiveCharacterTextSplitter (spec §7.4)."""
 
-from __future__ import annotations
-
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 

@@ -9,8 +9,6 @@ Endpoints are read-only. Use CLI commands for data modification:
     semsearch delete --filter '{"source": "..."}'
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import time

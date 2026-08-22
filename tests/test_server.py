@@ -3,8 +3,6 @@
 The server is read-only (search + stats). Data modification uses CLI.
 """
 
-from __future__ import annotations
-
 from unittest.mock import MagicMock
 
 import pytest

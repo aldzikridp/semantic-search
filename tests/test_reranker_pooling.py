@@ -1,7 +1,5 @@
 """Tests for persistent httpx.Client and retry logic in Reranker (TASK-027)."""
 
-from __future__ import annotations
-
 import time
 from unittest.mock import MagicMock, patch
 

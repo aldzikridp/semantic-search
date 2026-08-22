@@ -1,7 +1,5 @@
 """PGEngine/PGVectorStore construction and schema initialization (spec §7.5)."""
 
-from __future__ import annotations
-
 import logging
 
 import psycopg

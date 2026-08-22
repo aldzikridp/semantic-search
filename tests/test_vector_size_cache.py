@@ -1,7 +1,5 @@
 """Tests for vector size caching and DB read (TASK-025)."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import SecretStr
 from unittest.mock import MagicMock, patch

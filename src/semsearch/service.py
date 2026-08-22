@@ -1,7 +1,5 @@
 """Core service — SemanticSearchService facade (spec §7.6)."""
 
-from __future__ import annotations
-
 import asyncio
 import fnmatch
 import hashlib
@@ -10,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import psycopg
 from langchain_core.documents import Document
@@ -88,7 +86,7 @@ class SemanticSearchService:
         return psycopg.connect(self._db_url, **kwargs)
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> SemanticSearchService:
+    def from_settings(cls, settings: Settings) -> "SemanticSearchService":
         """Build all internal components from settings."""
         engine = build_engine(settings)
         embedder = build_embedder(settings)
@@ -96,7 +94,7 @@ class SemanticSearchService:
 
     # ---- Lifecycle ----
 
-    def __enter__(self) -> SemanticSearchService:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

@@ -1,7 +1,5 @@
 """Tests for HNSW tuning configuration (TASK-026)."""
 
-from __future__ import annotations
-
 import psycopg
 import pytest
 from pydantic import SecretStr
