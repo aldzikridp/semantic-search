@@ -429,53 +429,6 @@ def pg_container():
 
 ---
 
-## Task Tracking
-
-See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TASK-XXX-*.md`.
-
-**Status**: 29/29 tasks complete ✅
-
-### Phase 1: Core Implementation (Complete)
-
-| Phase | Task | Status |
-|-------|------|--------|
-| 1 | Project Scaffolding | ✅ |
-| 2 | Configuration Layer | ✅ |
-| 3 | Data Models | ✅ |
-| 4 | Document Loaders | ✅ |
-| 5 | Text Splitter | ✅ |
-| 6 | Embeddings Factory | ✅ |
-| 7 | Database Store | ✅ |
-| 8.1-2 | Service Skeleton & Stats | ✅ |
-| 8.3 | Service Ingest | ✅ |
-| 8.4 | Service Search | ✅ |
-| 8.5 | Service Delete | ✅ |
-| 8.6 | Service Ingest Dir | ✅ |
-| 8.7 | Service Reingest | ✅ |
-| 9 | CLI | ✅ |
-| 10.1-2 | Unit Tests | ✅ |
-| 10.3 | Integration Tests — Ingest | ✅ |
-| 10.4 | Integration Tests — Search | ✅ |
-| 10.5 | Integration Tests — Delete | ✅ |
-| 10.6 | Integration Tests — Ingest Dir | ✅ |
-| 10.7 | Integration Tests — Provider | ✅ |
-| 10.8 | CLI Tests | ✅ |
-| 11 | Documentation | ✅ |
-| 12 | Verification | ✅ |
-
-### Phase 1 Performance Optimization ✅
-
-| Task | Status | File |
-|------|--------|------|
-| Benchmark Harness | ✅ | `TASKS/TASK-024-benchmark-harness.md` |
-| Cache Vector Size + DB Read in stats() | ✅ | `TASKS/TASK-025-cache-vector-size.md` |
-| Expose HNSW Tuning in Config | ✅ | `TASKS/TASK-026-hnsw-tuning.md` |
-| Persistent httpx2.Client in Reranker | ✅ | `TASKS/TASK-027-reranker-httpx-pooling.md` |
-| FastAPI HTTP Server (`semsearch serve`) | ✅ | `TASKS/TASK-028-fastapi-server.md` |
-| Before/After Performance Benchmarks | ✅ | `TASKS/TASK-029-before-after-benchmarks.md` |
-
----
-
 ## Common Pitfalls
 
 1. **`init_vectorstore_table` is NOT idempotent** — Check `information_schema.tables` first
@@ -502,39 +455,6 @@ See `TODO.md` for the full task list. Each task has a detailed spec in `TASKS/TA
 |------|---------|
 | `README.md` | User-facing documentation |
 | `AGENTS.md` | This file — agent instructions |
-| `SPEC.md` | Full technical specification |
-| `PLAN.md` | Performance optimization plan (Phase 1) |
-| `TODO.md` | Task tracking with dependencies |
-| `TASKS/` | Individual task specs (29 files) |
 | `docs/` | Comprehensive documentation |
 | `docs/api-reference.md` | HTTP API reference for serve mode |
-| `BENCHMARKS.md` | Performance benchmark results and methodology |
-| `semantic-search-performance-audit.md` | Performance audit findings |
 
-<!-- gortex:communities:start -->
-## Community Skills
-
-| Area | Description | Explore |
-|------|-------------|---------|
-| 2 Dirs Get | 81 symbols | `analyze(operation:"communities", id:"community-65")` |
-| 2 Dirs Typer | 67 symbols | `analyze(operation:"communities", id:"community-61")` |
-| 1 Dirs Request | 54 symbols | `analyze(operation:"communities", id:"community-0")` |
-| 2 Dirs Close External Call Dep Semsearch Store | 49 symbols | `analyze(operation:"communities", id:"community-106")` |
-| 2 Dirs Close External Call Dep Semsearch Reranker | 42 symbols | `analyze(operation:"communities", id:"community-91")` |
-| 2 Dirs Semsearch Config Settings | 32 symbols | `analyze(operation:"communities", id:"community-66")` |
-| 1 Dirs Run Http Benchmark | 29 symbols | `analyze(operation:"communities", id:"community-59")` |
-| 1 Dirs Test Search With Rerank | 26 symbols | `analyze(operation:"communities", id:"community-92")` |
-| 2 Dirs Semsearch Config Embeddingprovi | 19 symbols | `analyze(operation:"communities", id:"community-103")` |
-| 1 Dirs Test Case D Stale Tail Pruned | 18 symbols | `analyze(operation:"communities", id:"community-96")` |
-| 2 Dirs Replace | 17 symbols | `analyze(operation:"communities", id:"community-68")` |
-| 1 Dirs Search | 17 symbols | `analyze(operation:"communities", id:"community-64")` |
-| Tests 1 Dirs | 16 symbols | `analyze(operation:"communities", id:"community-104")` |
-| 1 Dirs Embed | 16 symbols | `analyze(operation:"communities", id:"community-79")` |
-| Tests Testdelete | 15 symbols | `analyze(operation:"communities", id:"community-93")` |
-| 1 Dirs Ondata | 14 symbols | `analyze(operation:"communities", id:"community-5")` |
-| 1 Dirs Build Embedder | 14 symbols | `analyze(operation:"communities", id:"community-62")` |
-| 1 Dirs Registeronetool | 14 symbols | `analyze(operation:"communities", id:"community-3")` |
-| Tests Testconnectionreuse | 14 symbols | `analyze(operation:"communities", id:"community-99")` |
-| Extensions Gortex Def Execute | 13 symbols | `analyze(operation:"communities", id:"community-4")` |
-
-<!-- gortex:communities:end -->
