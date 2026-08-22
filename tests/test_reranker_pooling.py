@@ -1,6 +1,7 @@
 """Tests for persistent httpx.Client and retry logic in Reranker (TASK-027)."""
 
 import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,8 +24,8 @@ from semsearch.reranker import (
 from semsearch.config import Settings, EmbeddingProviderConfig
 
 
-def _make_config(**overrides) -> RerankerProviderConfig:
-    defaults = dict(
+def _make_config(**overrides: Any) -> RerankerProviderConfig:
+    defaults: dict[str, Any] = dict(
         base_url="https://example.com/rerank",
         model="test-rerank-model",
         api_key=SecretStr("test-key"),
@@ -41,7 +42,7 @@ def _make_docs(n: int = 5) -> list[Document]:
     ]
 
 
-def _mock_success_response(results: list[dict] | None = None) -> _httpx_module.Response:
+def _mock_success_response(results: list[dict] | None = None) -> Any:
     """Build a mock 200 response with reranker results."""
     if results is None:
         results = [
@@ -56,7 +57,7 @@ def _mock_success_response(results: list[dict] | None = None) -> _httpx_module.R
     return resp
 
 
-def _mock_429_response() -> _httpx_module.Response:
+def _mock_429_response() -> Any:
     """Build a mock 429 rate-limit response."""
     resp = MagicMock(spec=_httpx_module.Response)
     resp.status_code = 429
@@ -232,17 +233,54 @@ class TestRerankRetry:
         mock_sleep.assert_not_called()
         reranker.close()
 
-    def test_connection_error_raises_immediately(self):
+    def test_keepalive_expiry_is_300s(self):
+        """Phase E: pooled connections survive agent-scale idle gaps."""
+        config = _make_config()
+        reranker = Reranker(config, "test-key")
+        assert reranker._limits.keepalive_expiry == 300.0
+        reranker.close()
+
+    def test_stale_connection_retried_then_succeeds(self, caplog):
+        """Phase E: a half-open pooled connection costs one transparent retry.
+
+        First post() raises ConnectError (stale keep-alive hit), second
+        succeeds → results returned, exactly one retry logged, no exception.
+        """
+        import logging
+
         config = _make_config()
         reranker = Reranker(config, "test-key")
         docs = _make_docs(3)
 
-        mock_post = MagicMock(side_effect=_httpx_module.ConnectError("Connection refused"))
+        stale = _httpx_module.ConnectError("stale keep-alive connection")
+        mock_post = MagicMock(side_effect=[stale, _mock_success_response()])
         with patch.object(reranker._client, "post", mock_post):
-            with pytest.raises(SearchError, match="Rerank failed"):
+            with caplog.at_level(logging.WARNING, logger="semsearch.reranker"):
+                result = reranker.rerank("query", docs)
+
+        assert len(result) == 3
+        assert mock_post.call_count == 2  # exactly one retry
+        retry_warnings = [
+            r for r in caplog.records if "connection error" in r.getMessage()
+        ]
+        assert len(retry_warnings) == 1
+        reranker.close()
+
+    def test_transport_error_exhausts_retries_raises_searcherror(self):
+        """Phase E: persistent transport failure surfaces as SearchError
+        (not a raw httpx error) after _MAX_RETRIES attempts."""
+        config = _make_config()
+        reranker = Reranker(config, "test-key")
+        docs = _make_docs(3)
+
+        mock_post = MagicMock(
+            side_effect=_httpx_module.ConnectError("Connection refused")
+        )
+        with patch.object(reranker._client, "post", mock_post):
+            with pytest.raises(SearchError, match="Rerank failed after retries"):
                 reranker.rerank("query", docs)
 
-        assert mock_post.call_count == 1
+        assert mock_post.call_count == _MAX_RETRIES
         reranker.close()
 
 

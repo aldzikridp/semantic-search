@@ -1,8 +1,10 @@
 """Provider-dispatch factory for LangChain Embeddings (spec §7.2)."""
 
 import logging
+from typing import Any
 
 from langchain_core.embeddings import Embeddings
+# pi-lens-ignore: import-not-found
 from pydantic import SecretStr
 
 from semsearch.config import EmbeddingProviderConfig, Settings
@@ -11,7 +13,7 @@ from semsearch.errors import ProviderConfigError
 logger = logging.getLogger(__name__)
 
 
-def _detect_httpx_version() -> tuple:
+def _detect_httpx_version() -> tuple[Any, Any, Any]:
     """Detect which httpx version the OpenAI SDK expects.
 
     OpenAI SDK v2.x uses httpx, v3.x uses httpx2.
@@ -37,12 +39,17 @@ def _detect_httpx_version() -> tuple:
 _httpx_module, _Timeout, _Limits = _detect_httpx_version()
 logger.debug("Using %s for HTTP client", _httpx_module.__name__)
 
-# Shared client settings to prevent stale keep-alive connections
+# Shared client settings
 _HTTPX_TIMEOUT = _Timeout(connect=5.0, read=10.0, write=5.0, pool=2.0)
 _HTTPX_LIMITS = _Limits(
     max_connections=10,
     max_keepalive_connections=5,
-    keepalive_expiry=10.0,  # Close idle connections after 10s
+    # 5-minute keep-alive: agent queries arrive seconds-to-minutes apart, so a
+    # short expiry forced a TCP+TLS re-handshake (~50–150 ms) on nearly every
+    # request. Idle sockets closed cleanly by the provider (LB idle-timeout,
+    # typically 60–120 s) are detected at checkout and replaced transparently;
+    # half-open connections are covered by the OpenAI SDK's max_retries=2.
+    keepalive_expiry=300.0,
 )
 
 
@@ -50,7 +57,7 @@ def _make_openai_clients(
     api_key: str,
     base_url: str | None = None,
     timeout: float = 10.0,
-) -> tuple:
+) -> tuple[Any, Any]:
     """Create OpenAI sync and async clients with proper httpx settings.
 
     Args:
@@ -143,7 +150,7 @@ def build_embedder(settings: Settings) -> Embeddings:
             # `extra_body` as a top-level kwarg on `.create()`, so we nest it:
             #     model_kwargs = {"extra_body": {"provider": {...}}}
             extra_body = _build_openrouter_routing(cfg)
-            model_kwargs: dict = {"extra_body": extra_body} if extra_body else {}
+            model_kwargs: dict[str, Any] = {"extra_body": extra_body} if extra_body else {}
         else:
             base_url = cfg.base_url or "http://localhost:1234/v1"
             model_kwargs = {}
@@ -164,7 +171,7 @@ def build_embedder(settings: Settings) -> Embeddings:
     raise ProviderConfigError(f"unknown embedding provider type: {cfg.type}")
 
 
-def _build_openrouter_routing(cfg: EmbeddingProviderConfig) -> dict:
+def _build_openrouter_routing(cfg: EmbeddingProviderConfig) -> dict[str, Any]:
     """Build the OpenRouter ``extra_body`` dict (nested under ``model_kwargs``).
 
     Returns the inner dict — caller wraps it as
@@ -183,7 +190,7 @@ def _build_openrouter_routing(cfg: EmbeddingProviderConfig) -> dict:
 
     Returns ``{}`` when no routing fields are set.
     """
-    provider_body: dict = {}
+    provider_body: dict[str, Any] = {}
 
     if cfg.provider_order is not None:
         provider_body["order"] = [s.lower() for s in cfg.provider_order]

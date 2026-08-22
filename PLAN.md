@@ -1,469 +1,338 @@
-# PLAN.md — Codebase Optimization Plan
+# PLAN.md — Serve-Mode Performance Plan (Warmup, Keep-Alive, Pool Pre-Fill)
 
-> **STATUS: COMPLETE — all four phases implemented, reviewed, and verified
-> (2026-08-22).** Final suite: 132 passed, 1 skipped; 0 diagnostics.
-> See per-phase status notes and the Success Metrics table for actuals.
-
-> Covers **codebase/architecture optimizations** identified by a structural
-> review (2026-08-22), building on performance work already in the codebase
-> (vector-size caching, HNSW/DiskANN tuning, reranker connection pooling,
-> warm serve mode). Search-latency wins from external factors (embedding
-> model choice, index tuning) are documented separately and are
-> **out of scope** here.
->
-> Self-contained: this plan is the single source of truth for the phases
-> below — no external task files.
+> **Previous plan (batched inserts, search dedupe, connection pooling,
+> service split) is COMPLETE** — all four phases landed and verified on
+> 2026-08-22; summary in the Appendix. This document covers the next unit of
+> work: making the first request faster **and** every subsequent request
+> faster — **without touching any paid API**.
 
 ---
 
-## 0. Guiding Constraints (non-negotiable)
+## Phases at a Glance
 
-All changes MUST comply with `AGENTS.md` design decisions:
+| Phase | Item | Effort | Win | Depends on |
+| ------- | ------ | -------- | ----- | ------------ |
+| **E** | Raise HTTP `keepalive_expiry` 10 s → 300 s + reranker transport-retry | small | **~50–150 ms on nearly every request** (steady state) | — |
+| **W** | Serve-mode startup warmup | small | removes ~5–30 ms local init from first request | — |
+| **F** | Pool pre-fill inside `warmup()` | small | first concurrent burst doesn't serialize on connection setup | W |
 
-1. Write path stays **service-owned SQL** via raw `psycopg` — no
-   `PGVectorStore.add_documents()` ever.
-2. `PGVectorStore` stays **read-only** (search only).
-3. Deterministic TEXT ids `"{source}::{chunk_index}"` — unchanged.
-4. Connection ownership rule: `conn=None` → method owns lifecycle;
-   `conn` provided → caller owns it. Phase C must preserve this.
-5. Lazy store initialization via the `store` property — unchanged.
-6. All Python commands run inside `nix develop`.
-7. Every phase lands with the full test suite green
-   (`TEST_DATABASE_URL=... pytest -q`) — **114 passed, 1 skipped** baseline.
-
-**Baseline measurements** (re-measure at phase start; numbers from
-2026-08-22 session):
-
-| Metric | Value |
-| -------- | ------- |
-| Test suite | 114 passed, 1 skipped |
-| Diagnostics (`src/semsearch`) | 0 errors |
-| Coverage | ~77–79% (85% gate pre-existing shortfall — not this plan's scope) |
-| Ingest write pattern | 1 INSERT round-trip **per changed chunk** |
-| `search()` / `asearch()` | ~85 lines each, ~60% duplicated |
-| `_get_conn()` call sites | 7 (fresh connection per operation) |
-| `service.py` size | 765 lines, 36 symbols |
+Land order: **E → W → F** (E is independent and the biggest win; F extends
+W's `warmup()`). One commit per phase.
 
 ---
 
-## Phase A — Batch the CASE B/C ingest inserts
+## Phase E — Raise HTTP `keepalive_expiry` (10 s → 300 s)
 
-**Priority: HIGH · Effort: small · Payoff: minutes → seconds on large ingests**
+**Priority: HIGH · Effort: small · Payoff: eliminates repeated TLS handshakes in steady state**
 
-**✅ DONE (2026-08-22).** Multi-row VALUES via `psycopg.sql`, batched at
-`_BC_INSERT_BATCH_SIZE = 1000`; `_build_chunk_metadata()` extracted; +2 tests
-(`TestBatchedIngest`). Benchmark (BENCHMARKS.md): 724 ms → 667 ms for 500
-chunks on local unix socket (1.1×) — round-trip savings are marginal locally,
-but scale with DB network RTT; see the honest interpretation there.
+(Effort raised from "trivial" to "small": safe expiry requires one hardening
+fix in the reranker — see E.5.)
 
-### A.1 Problem
+### E.1 Problem
 
-`service.py::ingest()` (lines ~291–332) inserts changed/new chunks **one
-round-trip per chunk**:
+Both paid-API clients discard idle connections after **10 seconds**:
+
+- `src/semsearch/embeddings.py:42–46` — `_HTTPX_LIMITS = _Limits(..., keepalive_expiry=10.0)`
+  (module constant, shared by sync + async clients)
+- `src/semsearch/reranker.py:78` — inline `_Limits(..., keepalive_expiry=10.0)`
+
+Real agent workloads issue queries seconds-to-minutes apart, so the pooled
+connection is almost always already expired → **nearly every request re-pays
+TCP+TLS (~50–150 ms)** to the embedding API (and to the reranker endpoint on
+reranked queries). This dwarfs all other per-request overhead we've optimized.
+
+**Not configurable today**: verified — `config.py` only exposes DB TCP
+keep-alives (`db_keepalive_idle/interval/count`, a different mechanism);
+the HTTP limits are hardcoded in both files.
+
+### E.2 Stale-connection analysis (why 300 s needs one companion fix)
+
+Two flavors of "stale" exist once connections idle longer:
+
+1. **Cleanly closed by server** (FIN received while idle — the common case;
+   provider LBs idle-timeout at ~60–120 s): httpcore detects the EOF at
+   checkout and silently discards the dead connection, opening a fresh one.
+   **Fully transparent — handled.**
+2. **Half-open / black-holed** (no FIN — NAT drop, network blip): the client
+   cannot know; the request hangs until the read timeout (10 s, already
+   configured). Component behavior then diverges:
+   - **Embedding path**: protected — OpenAI SDK built with `max_retries=2`
+     retries connection errors automatically → slower request, no failure.
+   - **Reranker path**: ⚠️ **gap** — the retry loop in `rerank()` catches only
+     `_HTTPStatusError` (429 backoff); transport errors propagate uncaught →
+     `SearchError` → HTTP 500. With the current 10 s expiry this is nearly
+     impossible; with 300 s it becomes occasionally possible.
+
+Worst-case trade: today = every request pays a handshake, stale hits ~never;
+with E = requests usually reuse, and a rare stale hit costs one transparent
+retry (after E.4).
+
+### E.3 Proposed change (Option A — better hardcoded default)
+
+Change both sites to `keepalive_expiry=300.0` with a rationale comment.
+Update the stale comment on embeddings.py line 45.
+
+**Rejected alternative (Option B — expose as config)**: adding
+`SEMSEARCH_*__HTTP_KEEPALIVE_EXPIRY` surface area for a value no deployment
+plausibly needs to tune. Promoting to config later is trivial if ever needed.
+
+### E.4 Required hardening: reranker transport-error retry
+
+Extend the existing retry loop in `Reranker.rerank()` so connection-level
+failures are retried like 429s instead of propagating:
 
 ```python
-# CASE B + C: INSERT ... ON CONFLICT DO UPDATE
-for vec_idx, chunk_idx in enumerate(bc_indices):
-    ...
-    _exec(cur, f"INSERT INTO {table} ... VALUES (%s, ...) ON CONFLICT ...",
-          (chunk_id, str(vec), chunk.page_content, json.dumps(metadata),
-           source, chunk_idx, h))
+except _HTTPStatusError as e:
+    if e.response.status_code == 429 and attempt < _MAX_RETRIES - 1:
+        ...  # existing 429 backoff (unchanged)
+    else:
+        raise
+except _HTTPXTransportError as e:   # ConnectError, ReadError, RemoteProtocolError, ...
+    if attempt < _MAX_RETRIES - 1:
+        logger.warning("Reranker connection error (%s), retrying (attempt %d/%d)",
+                       e, attempt + 1, _MAX_RETRIES)
+        continue                    # fresh pooled connection on next attempt
+    raise SearchError(f"Rerank failed after retries: {e}") from e
 ```
 
-A 500-chunk PDF pays 500 serial network round-trips inside one transaction.
-At ~0.2–1ms per round-trip (local socket) that is 0.1–0.5s of pure wait per
-file — multiplied across `ingest_dir` over hundreds of files.
+Notes:
 
-CASE A (bulk `UPDATE ... WHERE langchain_id = ANY(%s)`) and CASE D (single
-`DELETE`) are already set-based; only B/C is row-by-row.
+- `_HTTPXTransportError` = `httpx.TransportError` (or `httpx2` equivalent via
+  the existing `_httpx_module` indirection) — covers ConnectError,
+  ReadTimeout, ReadError, WriteError, RemoteProtocolError.
+- A stale half-open hit costs one extra attempt (~read-timeout bound), then
+  succeeds on the fresh connection — matching the embedding path's behavior.
+- Non-429 HTTP status errors keep raising immediately (unchanged semantics).
 
-### A.2 Proposed change
+### E.5 Files / tests / verification
 
-Replace the Python loop with **one multi-row INSERT statement** built with
-`psycopg.sql` placeholders (NOT string concatenation of values):
-
-```python
-# CASE B + C: single multi-row INSERT ... ON CONFLICT
-rows: list[tuple] = []
-for vec_idx, chunk_idx in enumerate(bc_indices):
-    chunk = chunks[chunk_idx]
-    metadata = _build_chunk_metadata(chunk, self.settings, now)
-    rows.append((
-        f"{source}::{chunk_idx}",
-        str(vectors[vec_idx]),
-        chunk.page_content,
-        json.dumps(metadata),
-        source,
-        chunk_idx,
-        hashes[chunk_idx],
-    ))
-
-if rows:
-    placeholders = b", ".join(
-        pg_sql.SQL("(%s, %s, %s, %s::jsonb, %s, %s, %s)") for _ in rows
-    )
-    # Composed via psycopg.sql to keep identifiers/values parameterized:
-    query = pg_sql.SQL(
-        "INSERT INTO {table} (langchain_id, embedding, content, "
-        "langchain_metadata, source, chunk_index, document_hash) "
-        "VALUES {rows} ON CONFLICT (source, chunk_index) DO UPDATE "
-        "SET embedding = EXCLUDED.embedding, content = EXCLUDED.content, "
-        "document_hash = EXCLUDED.document_hash, "
-        "langchain_metadata = EXCLUDED.langchain_metadata"
-    ).format(table=pg_sql.Identifier(table), rows=placeholders)
-    cur.execute(query, [v for row in rows for v in row])
-```
-
-**Decision point — multi-row VALUES vs `executemany`:**
-
-| Option | Round-trips | Pros | Cons |
-|--------|-------------|------|------|
-| Multi-row VALUES | 1 | Fastest; single statement | Param flattening; statement length grows with batch (cap at ~1000 rows/chunk) |
-| `cur.executemany()` + pipeline | N logical, pipelined | Simplest diff; psycopg batches internally | Slightly slower than true multi-row; still one transaction |
-
-**Chosen: multi-row VALUES with a chunk cap of 1000 rows per statement**
-(largest realistic files are far below this; loop the statement if ever
-exceeded). Rationale: simplest mental model, fewest round-trips, and the
-statement is still fully parameterized.
-
-**Refactor companion:** extract `_build_chunk_metadata(chunk, settings, now)
--> dict` (currently inline in the loop, lines ~296–306) — reused by nothing
-else today but makes the loop body trivial and unit-testable.
-
-### A.3 Files touched
-
-- `src/semsearch/service.py` — `ingest()` only
-- `tests/test_service_ingest.py` — add 2 tests:
-  - `test_ingest_many_chunks_single_transaction` — ingest 300+ chunk mock
-    file, assert all rows present and `IngestResult` counts correct
-  - `test_ingest_case_bc_preserves_upsert_semantics` — re-ingest modified
-    file; CASE B rows updated, CASE C added, CASE A untouched (guards the
-    `ON CONFLICT` behavior through the refactor)
-
-### A.4 Verification
-
-1. `pytest tests/test_service_ingest.py tests/test_service_ingest_dir.py -v`
-2. Full suite green.
-3. Micro-benchmark: ingest a generated 500-chunk text file before/after;
-   record wall time in `BENCHMARKS.md` (file exists; append a Phase 2
-   section). If `BENCHMARKS.md` is retired, record results in this plan's
-   Success Metrics table instead.
-4. `EXPLAIN ANALYZE` the generated statement once to confirm the plan is a
-   simple insert, not per-row triggers/surprises.
-
-### A.5 Risks & mitigations
-
-- **Risk**: parameter-count limits with huge batches → mitigated by the
-  1000-row cap (7000 params, far below Postgres' 65535 bound).
-- **Risk**: `str(vec)` embedding serialization for hundreds of vectors is
-  CPU work in Python → acceptable; it replaces N× round-trip waits. Profile
-  only if benchmarks disagree.
+- `src/semsearch/embeddings.py` — constant + comment (E.3)
+- `src/semsearch/reranker.py` — inline limits (E.3) + transport-retry (E.4)
+- `tests/test_embeddings.py` — assert `_HTTPX_LIMITS.keepalive_expiry == 300.0`
+- `tests/test_reranker_pooling.py` —
+  - assert the reranker client's limits carry `keepalive_expiry == 300.0`
+    (expose limits on the instance if needed)
+  - **new:** simulated stale connection — first `post()` raises
+    `ConnectError`, second succeeds → `rerank()` returns results, exactly one
+    retry logged, no exception escapes
+  - **new:** transport error on all attempts → raises `SearchError` (not a
+    raw httpx error) after `_MAX_RETRIES`
+- Verify: full suite green.
 
 ---
 
-## Phase B — Deduplicate `search()` / `asearch()`
+## Phase W — Serve-mode startup warmup
 
-**Priority: MEDIUM · Effort: small · Payoff: maintainability; eliminates sync/async drift risk**
+**Priority: MEDIUM · Effort: small · Payoff: removes local lazy-init from first request**
 
-**✅ DONE (2026-08-22).** All four helpers extracted as specified; both
-methods now ~12 lines; `asearch` offloads the entire rerank flow to a thread
-(improvement over plan). +6 tests (`TestResolveK` boundaries). Response
-equivalence verified against pre-refactor code — identical modulo fresh
-`ingested_at` timestamps and pgvector tie-order nondeterminism (reproduced
-twice on unchanged code).
+### W.1 Background
 
-### B.1 Problem
+Component lifecycle in serve mode:
 
-`service.py` has two ~85-line methods (`search()` lines 560–646,
-`asearch()` lines 648–717) with three duplicated logic blocks:
+| Component | Created | First physical connection |
+| ----------- | --------- | -------------------------- |
+| `PGEngine` (SQLAlchemy pool 5+10) | startup | first search (lazy checkout) |
+| Embedder + OpenAI/async clients | startup | first search (TCP+TLS) |
+| `PGVectorStore` | **first search** (lazy property) | same moment |
+| `Reranker` + `httpx2.Client` | **first rerank request** (lazy property) | that request |
+| Opt-in psycopg pool (Phase C) | **first service-owned op** | that operation |
 
-1. **k validation** (`if k is None: k = self.settings.default_k; if not
-   (1 <= k <= 50): raise ValueError(...)` + `fetch_k = k*4 if rerank else k`)
-2. **Result conversion** — the 15-line `SearchResult(...)` construction loop
-   incl. the `score = 1.0 - distance` conversion (AGENTS.md decision #5)
-3. **Rerank orchestration** — reranker-missing check, `Document` wrapping
-   with `_search_result` metadata round-trip, `rerank_score` re-injection
+The first `/search` pays `PGVectorStore.create_sync()` + first DB connection
+setup; the first reranked search additionally pays `Reranker` construction.
 
-Any future change to scoring, filter semantics, or rerank flow must be made
-twice. Divergence between sync/async paths is a silent-bug factory.
+### W.2 Explicitly rejected: warming the embedding/reranker APIs
 
-### B.2 Proposed change
+1. **Availability coupling** — startup would fail or hang when a provider is
+   down/rate-limited, even though everything local works.
+2. **Zero net saving** — for any server that serves ≥1 search, the warmup
+   call merely replaces the first real request's API call; it only wastes
+   money when the server starts and never serves.
+3. Verified: `Reranker.__init__` only stores config and creates an idle
+   `httpx.Client` — **construction sends nothing** (httpx connects lazily),
+   so building it at startup is free.
 
-Extract three private helpers on the service class:
-
-```python
-def _resolve_k(self, k: int | None, rerank: bool) -> tuple[int, int]:
-    """Validate k, return (k, fetch_k). Raises ValueError."""
-
-@staticmethod
-def _to_search_results(
-    results_with_scores: list[tuple[Document, float]],
-) -> list[SearchResult]:
-    """distance → score = 1.0 - distance; build SearchResults."""
-
-def _apply_rerank(
-    self, query: str, results: list[SearchResult], k: int
-) -> list[SearchResult]:
-    """Shared rerank flow. Sync call; async caller wraps in to_thread."""
-
-def _rerank_docs(self, results: list[SearchResult]) -> list[Document]:
-    """Wrap results in Documents with _search_result round-trip metadata."""
-```
-
-Resulting bodies:
+### W.3 Design: `warmup()` in `services/admin.py` (AdminMixin)
 
 ```python
-def search(self, query, k=None, filter=None, rerank=False):
-    k, fetch_k = self._resolve_k(k, rerank)
+def warmup(self) -> dict[str, bool]:
+    """Pre-build lazily-initialized local resources.
+
+    Safe at server startup: touches ONLY local resources (PGVectorStore,
+    one DB round-trip, reranker client construction). Never contacts the
+    embedding or reranker APIs. Fail-open: logs and continues on error so
+    startup never depends on DB state or providers.
+    """
+    result = {"store": False, "db": False, "reranker": False}
     try:
-        raw = self.store.similarity_search_with_score(query, k=fetch_k, filter=filter)
+        _ = self.store                      # build PGVectorStore
+        result["store"] = True
     except Exception as e:
-        raise SearchError(f"Search failed: {e}") from e
-    results = self._to_search_results(raw)
-    if rerank:
-        results = self._apply_rerank(query, results, k)
-    return results[:k]
-
-async def asearch(self, query, k=None, filter=None, rerank=False):
-    k, fetch_k = self._resolve_k(k, rerank)
+        logger.warning("Warmup: store init deferred (%s)", e)
     try:
-        raw = await self.store.asimilarity_search_with_score(query, k=fetch_k, filter=filter)
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            result["db"] = True
+        finally:
+            self._release_conn(conn)
     except Exception as e:
-        raise SearchError(f"Search failed: {e}") from e
-    results = self._to_search_results(raw)
-    if rerank:
-        results = await asyncio.to_thread(self._apply_rerank, query, results, k)
-    return results[:k]
+        logger.warning("Warmup: DB round-trip deferred (%s)", e)
+    if self.settings.reranker is not None:
+        try:
+            _ = self.reranker               # construct client (no request)
+            result["reranker"] = True
+        except Exception as e:
+            logger.warning("Warmup: reranker init deferred (%s)", e)
+    return result
 ```
 
-Net: each public method drops from ~85 to ~12 lines; the async path keeps
-its `to_thread` offload for the sync reranker (unchanged behavior).
-
-### B.3 Files touched
-
-- `src/semsearch/service.py` — `search()`, `asearch()`, 4 new private helpers
-- `tests/test_service_search.py` — add unit tests for `_resolve_k` boundary
-  cases (0, 1, 50, 51, None) — currently only covered incidentally
-
-### B.4 Verification
-
-1. Full suite (search tests: `test_service_search.py`,
-   `test_server.py::TestSearch`, rerank tests in `test_reranker_pooling.py`).
-2. Manual: `semsearch serve` + one rerank request; confirm `rerank_score`
-   still present in response metadata.
-3. Diff the HTTP response JSON of a fixed query before/after — must be
-   byte-identical.
-
-### B.5 Risks
-
-- **Risk**: subtle ordering difference (reranked list already truncated to
-  `top_n=k` by reranker; final `[:k]` is a no-op but must remain).
-  Mitigation: byte-identical response check in B.4.3.
-
----
-
-## Phase C — Connection pooling for service-owned connections
-
-**Priority: LOW · Effort: small · Payoff: ~1–5ms/request under serve load; caps concurrent DB connections**
-
-**✅ DONE (2026-08-22).** Opt-in via `SEMSEARCH_POOL__*` (min_size=0 default =
-OFF); `_leased` set preserves ownership rule #15; all 7 `_get_conn()` sites
-release via `_release_conn`; `psycopg-pool>=3.2` declared. +10 tests
-(`test_service_pool.py`). Live check: 4 ops over 2 pooled connections,
-zero leaks after `close()`. Note: total server connections at worst are
-`pool.max_size + 5` because PGEngine's separate SQLAlchemy pool coexists.
-
-### C.1 Problem
-
-`_get_conn()` (`service.py:95–106`) opens a **fresh psycopg connection for
-every operation** — 7 call sites (ingest ×2, ingest_dir ×2, delete,
-reingest, stats). Fine for one-shot CLI usage; wasteful when `serve` mode
-serves `/stats` or future write endpoints under load: each request pays
-connection setup (~1–5ms on unix socket, more on TCP) and Postgres pays
-backend fork/teardown.
-
-### C.2 Proposed change
-
-Add an **opt-in** pool used only when the method owns the connection
-(preserving the AGENTS.md #15 ownership rule):
+### W.4 Lifespan integration (`server.py::create_app`)
 
 ```python
-# config.py
-class PoolConfig(BaseModel):
-    """SEMSEARCH_POOL__* — 0 disables pooling (pure per-call connections)."""
-    min_size: int = Field(default=0, ge=0, le=10)
-    max_size: int = Field(default=4, ge=1, le=32)
-    timeout: float = Field(default=5.0, gt=0)
+svc = service or SemanticSearchService.from_settings(settings)
+app.state.service = svc
+# Warm local resources only — never touches paid APIs, so startup
+# stays available even when providers are down.
+warm = await asyncio.to_thread(svc.warmup)
+logger.info("Semsearch service started (warmup: %s)", warm)
 ```
+
+### W.5 Decision points (resolved)
+
+| Question | Decision | Rationale |
+| ---------- | ---------- | ----------- |
+| Config flag to disable warmup? | **No** | Free, fail-open, ~20 ms; a flag is surface without a use case |
+| Fail startup if warmup fails? | **No** — warn and continue | Availability-first; degrades to today's behavior |
+| `stats()` vs `SELECT 1` for DB step? | **`SELECT 1`** | stats() runs 4+ queries; overkill for pool liveness |
+| Embedding API ping? | **No** (see W.2) | Cost + availability coupling |
+
+---
+
+## Phase F — Pool pre-fill inside `warmup()`
+
+**Priority: LOW · Effort: small · Payoff: first concurrent burst doesn't serialize on connection setup**
+
+### F.1 Problem
+
+Warmup (W) opens exactly **one** DB connection. The search path's SQLAlchemy
+pool holds up to 5 (+10 overflow) connections that are still created lazily —
+so the first burst of concurrent requests serializes on connection setup
+(~1–5 ms each, plus asyncpg backend spawn server-side).
+
+### F.2 Design
+
+Extend `warmup()` with a pre-fill step: check out and return ~5 connections
+against `PGEngine`'s underlying SQLAlchemy engine so the pool is at its
+`pool_size` before the first request.
+
+Implementation notes (verified against installed `langchain-postgres`):
+
+- `PGEngine` keeps its engine **private** (factory builds it via
+  `create_async_engine` and stores it on the instance); there is no public
+  accessor. At implementation time, locate the attribute on the instance
+  (e.g. `vars(pg_engine)` → the `AsyncEngine`), then drive N concurrent
+  `SELECT 1` checkouts through it (or its `sync_engine`) and return them.
+- Guarded like every other warmup step: failure → warning, no raise.
+- Cap pre-fill at `min(pool_size=5, 5)` — never exceed the configured pool.
 
 ```python
-# service.py
-@property
-def _pool(self) -> psycopg_pool.ConnectionPool | None:
-    """Lazily built; None when pooling disabled (min_size=0)."""
-    if self._pool_obj is None and self.settings.pool.min_size > 0:
-        self._pool_obj = ConnectionPool(
-            self._db_url, min_size=..., max_size=...,
-            timeout=..., open=True, kwargs={"options": keepalive_options},
-        )
-    return self._pool_obj
-
-def _get_conn(self) -> psycopg.Connection:
-    """From pool when enabled; else fresh connection (current behavior)."""
+try:
+    await-or-run N concurrent SELECT 1 via the async engine   # details at impl
+    result["pool_prefill"] = True
+except Exception as e:
+    logger.warning("Warmup: pool pre-fill deferred (%s)", e)
 ```
 
-**Ownership semantics — the critical part:**
+(If async-engine plumbing proves awkward, acceptable fallback: N sequential
+checkouts — the goal is pool membership, not speed of the warmup itself.)
 
-- `_get_conn()` returns a raw `psycopg.Connection` either way (pool's
-  `connection()` context manager is used internally with
-  `check=False`-style manual return).
-- Methods keep `conn.close()` calls; when pooled, `_get_conn` wraps the
-  returned connection so that `.close()` **returns it to the pool** instead
-  of closing. Implementation: a tiny `_PooledConnection` proxy or, simpler,
-  pool-leased connections are returned via `_release_conn(conn)` and the 7
-  call sites' `finally: conn.close()` blocks switch to
-  `self._release_conn(conn)`.
-- `close()` (service lifecycle) also calls `self._pool_obj.close()`.
+### F.3 Files / tests / verification
 
-**Default remains `min_size=0` (pooling OFF)** → zero behavior change for
-existing users; `serve` users can enable it via env:
-
-```bash
-SEMSEARCH_POOL__MIN_SIZE=1
-SEMSEARCH_POOL__MAX_SIZE=4
-```
-
-### C.3 Files touched
-
-- `src/semsearch/config.py` — `PoolConfig` + `Settings.pool` field
-- `src/semsearch/service.py` — `_pool` property, `_get_conn`/`_release_conn`,
-  `close()`
-- `pyproject.toml` — add `psycopg-pool>=3.2` (already importable at 3.3.1 in
-  the dev env via psycopg extras, but must be a declared dependency)
-- `tests/` — new `test_service_pool.py`: pool disabled by default; enabled
-  pool reuses connections (assert via pool stats); `close()` shuts it down;
-  ownership rule intact (caller-provided `conn` never touches the pool)
-- `docs/configuration.md` — new env var section
-
-### C.4 Verification
-
-1. Full suite green (default config = pooling off = current behavior).
-2. Pool-enabled run: `serve` + 50 sequential `/stats` requests; assert
-   `pool.getstats()[requests] >= 50` while server-side connection count
-   (pg_stat_activity) stays ≤ max_size.
-3. `semsearch stats` / `ingest` / `delete` CLI paths with pool enabled —
-   no leaked connections (`pg_stat_activity` count returns to baseline).
-
-### C.5 Risks
-
-- **Risk**: connection returned to pool mid-transaction → mitigated by
-  returning only in the same `finally` blocks that previously called
-  `close()` (Postgres rolls back any open transaction on pool return check;
-  psycopg_pool does `RESET`).
-- **Risk**: forked processes (none today) sharing a pool → documented as
-  unsupported; pool is created lazily post-fork.
+- `src/semsearch/services/admin.py` — extend `warmup()`
+- Tests: `warmup()` returns `pool_prefill: True`; SQLAlchemy pool
+  `checkedin() >= 5` (or engine-equivalent) after warmup; still green with
+  Phase C psycopg pool enabled/disabled (orthogonal pools).
+- Live check: warmup → `pg_stat_activity` shows ≥5 backends for the DB.
 
 ---
 
-## Phase D — Split the service god-class (opportunistic)
+## Cross-Phase Files Touched
 
-**Priority: DEFERRED → ✅ DONE EARLY (2026-08-22)**
-
-**Governance note:** §D.3's trigger criteria were *not* met (~880 lines at
-the time; no 4th responsibility; no cross-area change forcing it).
-Implemented early by owner decision. Review found the split clean:
-facade composes `IngestMixin` / `SearchMixin` / `AdminMixin` on
-`BaseService`; zero import cycles; all 9 external consumers untouched;
-suite green (132 passed); coverage improved to 80.15%. AGENTS.md source
-layout updated accordingly.
-
-### D.1 Problem
-
-`SemanticSearchService` is 765 lines / 36 symbols spanning five distinct
-responsibilities: schema/dimension management, ingest, delete/reingest,
-search (sync+async), stats. Works today, but every new feature lands in one
-file and the import graph concentrates all fan-in on one module.
-
-### D.2 Proposed target shape (when triggered)
-
-Split **internals only**; keep `SemanticSearchService` as a facade with the
-exact same public API (CLI/server/tests untouched):
-
-```
-src/semsearch/
-  services/
-    __init__.py          # re-exports
-    base.py              # shared: settings, _get_conn/_release_conn, lifecycle
-    ingest.py            # IngestMixin: ingest, ingest_dir, reingest
-    search.py            # SearchMixin: search, asearch, _apply_rerank, ...
-    admin.py             # AdminMixin: delete, stats, init_schema, dim probing
-  service.py             # class SemanticSearchService(IngestMixin, SearchMixin, AdminMixin): ...
-```
-
-Mixin composition over microservice-style separation: keeps single-process
-in-memory state (pool, cached vector size) coherent, zero API churn.
-
-### D.3 Trigger criteria (do NOT start before at least one holds)
-
-- `service.py` exceeds ~1200 lines, **or**
-- a 4th distinct responsibility appears (e.g., query-result cache, export),
-  **or**
-- a change requires touching >2 unrelated responsibility areas
-  simultaneously.
-
-### D.4 Verification
-
-Full suite + import-graph check (no cycles; `cli.py`/`server.py` imports
-unchanged). No benchmark impact expected — pure code motion.
+| File | E | W | F |
+| ------ | --- | --- | --- |
+| `src/semsearch/embeddings.py` | ✔ | | |
+| `src/semsearch/reranker.py` | ✔ | | |
+| `src/semsearch/services/admin.py` | | ✔ | ✔ |
+| `src/semsearch/server.py` | | ✔ | |
+| `tests/test_embeddings.py` | ✔ | | |
+| `tests/test_reranker_pooling.py` | ✔ | | |
+| `tests/test_server.py` | | ✔ | ✔ |
+| `docs/api-reference.md` | | ✔ (startup warms local resources) | |
 
 ---
 
-## Rollout Order & Milestones
+## Verification (per phase)
 
-| Order | Phase | Status |
-| ------- | ------- | -------- |
-| 1 | **A** batched inserts | ✅ landed |
-| 2 | **B** search dedupe | ✅ landed |
-| 3 | **C** connection pool | ✅ landed (+docs) |
-| 4 | **D** service split | ✅ landed early (owner decision — see §D note) |
+1. Full suite green via `nix develop` (baseline: **132 passed, 1 skipped**).
+2. Diagnostics zero errors.
+3. **E**: manual timing — two searches 30 s apart; second request should no
+   longer include a TLS handshake (compare request timings before/after).
+4. **W**: first `/search` wall time before/after (local-init portion ~5–30 ms
+   disappears); bogus `collection_name` startup → warning + `/health` OK.
+5. **W/F negative proof**: serve with unreachable provider endpoints →
+   startup completes instantly (no provider dependency).
+6. **F**: `pg_stat_activity` shows pre-filled backends right after startup.
 
-Each phase: implement → full suite → diagnostics zero → benchmark note →
-commit. Never two phases in one commit.
+---
 
-### Documentation housekeeping
+## Risks & Mitigations
 
-AGENTS.md's **Documentation Files** table no longer lists this plan after
-the task-tracking cleanup. Re-add the following row with the first landed
-phase (A):
+| Risk | Phase | Mitigation |
+| ------ | ------- | ------------ |
+| Provider closes idle sockets server-side | E | httpx reconnects transparently; no correctness impact |
+| Warmup masks real DB problems | W | Warning logged with exception at startup |
+| Table absent at first boot | W | Fail-open by design; warms on first successful path |
+| Private PGEngine attribute changes upstream | F | Guarded try/except → graceful skip; pin langchain-postgres range |
+| Pre-built services double-warmed in tests | W/F | Idempotent (properties cache) |
 
-```markdown
-| `PLAN.md` | Current optimization plan (batched inserts, search dedupe, pooling) |
-```
-
-If `BENCHMARKS.md` is kept, also restore its row:
-
-```markdown
-| `BENCHMARKS.md` | Performance benchmark results and methodology |
-```
-
-## Out of Scope (explicitly)
-
-- Embedding-model / dimension changes (require re-ingest; separate decision)
-- HNSW/DiskANN tuning defaults (runtime config already exposes them)
-- Coverage-gate shortfall (85% gate vs ~78% actual — pre-existing)
-- Query-result caching (proposed separately if agents show repeat-query
-  patterns; would add invalidation complexity vs ingest hashes)
-- turbovec / non-Postgres backends (rejected 2026-08-22 — keep PostgreSQL)
+---
 
 ## Success Metrics
 
-| Metric | Baseline (2026-08-22) | Target | Actual |
-| -------- | ---------------------- | -------- | -------- |
-| 500-chunk file ingest wall time | 724 ms (per-row, local socket) | ≥2× faster | 667 ms (1.1× local; scales with DB RTT — see BENCHMARKS.md) |
-| `search`/`asearch` duplicated lines | ~60 lines | 0 | **0** (shared helpers in `services/search.py`) |
-| Per-op DB connection setups (serve, pool on) | 1/request | ≤ 1/pool-lifetime | **4 ops / 2 connections** (live-verified) |
-| Test suite | 114 passed, 1 skipped | ≥ 114 passed, 0 regressions | **132 passed, 1 skipped** (+18 new) |
-| Diagnostics | 0 errors | 0 errors | **0 errors** |
-| HTTP response JSON for fixed query | — | byte-identical pre/post each phase | **verified** (Phase B; mod timestamps/tie-order) |
-| Coverage | ~77–79% | (gate out of scope) | 80.15% (+~3 pts) |
-| `service.py` size | 765 lines / 36 symbols | split when triggered | **27-line facade** + 4 mixins (912 lines total) |
+| Metric | Baseline | Target |
+| -------- | ---------- | -------- |
+| Steady-state request after >10 s idle gap | +50–150 ms TLS re-handshake | ~0 ms (E) |
+| First `/search` local-init portion | ~5–30 ms | ~0 ms (W) |
+| First concurrent burst connection setups | serialized | pre-filled (F) |
+| Startup outbound API requests | 0 | **0 (guaranteed by test)** |
+| Startup wall-time added | — | ≤ 50 ms |
+| Test suite | 132 passed, 1 skipped | ≥ 132 passed, 0 regressions |
+| Diagnostics | 0 errors | 0 errors |
+
+---
+
+## Deferred (not in this plan)
+
+- **Query-embedding LRU cache** (embed once per unique query, search by
+  vector): feasible — verified `PGVectorStore.asimilarity_search_with_score_by_vector`
+  exists — and would save real API money on repeated agent queries, but it's
+  a search-path refactor (sync + async). Revisit when repeat-query patterns
+  are observed.
+- **Full result cache**: needs ingest/delete invalidation; defer.
+- **Exposing HTTP limits as config**: rejected for now (Option B, see E.2).
+
+---
+
+## Appendix — Previously Completed Work (2026-08-22)
+
+All four phases of the prior codebase-optimization plan landed and were
+reviewed/verified:
+
+- **A — Batched CASE B/C inserts** (benchmarked: BENCHMARKS.md)
+- **B — search/asearch dedupe** (response-equivalence verified)
+- **C — Opt-in connection pool** (`SEMSEARCH_POOL__*`, live-verified)
+- **D — Service split** (facade + `services/` mixins; early by owner decision)
+
+Final suite at hand-off: **132 passed, 1 skipped · 0 diagnostics ·
+coverage 80.15%**.
