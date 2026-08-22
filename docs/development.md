@@ -121,10 +121,9 @@ def sample_csv(tmp_path):
 
 ```python
 # Standard library
-from __future__ import annotations
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 # Third-party
 from pydantic import BaseModel
@@ -134,6 +133,11 @@ from sqlalchemy import text
 from semsearch.config import Settings
 from semsearch.errors import FileIngestError
 ```
+
+Do **not** use `from __future__ import annotations` — annotations are
+eagerly evaluated (Python ≥3.11 target). For forward references, quote the
+name (`-> "ClassName"`) or use `typing.Self` for methods returning the
+enclosing class.
 
 ### Type Hints
 
@@ -239,7 +243,7 @@ print(f"First 5 values: {result[:5]}")
 type: Literal["openai", "ollama", "openai_compatible", "openrouter", "new_provider"]
 ```
 
-2. **Add to embeddings.py:**
+1. **Add to embeddings.py:**
 
 ```python
 if cfg.type == "new_provider":
@@ -250,7 +254,7 @@ if cfg.type == "new_provider":
     )
 ```
 
-3. **Add to pyproject.toml:**
+1. **Add to pyproject.toml:**
 
 ```toml
 [project.optional-dependencies]
@@ -259,7 +263,7 @@ new_provider = [
 ]
 ```
 
-4. **Add tests:**
+1. **Add tests:**
 
 ```python
 def test_new_provider_builds():
@@ -271,7 +275,7 @@ def test_new_provider_builds():
     assert isinstance(embedder, NewEmbeddings)
 ```
 
-5. **Update docs:**
+1. **Update docs:**
 
 - `docs/providers.md` — Add provider section
 - `docs/configuration.md` — Add env var example
@@ -292,7 +296,7 @@ _DOC_TYPE_BY_EXT = {
 }
 ```
 
-2. **Add to pick_loader:**
+1. **Add to pick_loader:**
 
 ```python
 elif suffix == ".new":
@@ -300,7 +304,7 @@ elif suffix == ".new":
     loader = NewLoader(str(path))
 ```
 
-3. **Add tests:**
+1. **Add tests:**
 
 ```python
 def test_new_loader(tmp_path):
@@ -416,6 +420,7 @@ finally:
 ```
 
 `ingest_dir()` and `reingest()` use this pattern automatically:
+
 - `ingest_dir(N files)` → 1 connection for the batch (not 2N)
 - `reingest()` → 1 connection for delete + ingest (not 2)
 
