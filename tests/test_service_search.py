@@ -40,3 +40,26 @@ class TestSearch:
         results = service.search("test", k=20, filter={"doc_type": "csv"})
         for r in results:
             assert r.doc_type == "csv"
+
+
+class TestResolveK:
+    """Phase B: unit tests for the shared k-validation helper."""
+
+    def test_k_none_uses_default(self, service):
+        k, fetch_k = service._resolve_k(None, rerank=False)
+        assert k == service.settings.default_k
+        assert fetch_k == k
+
+    @pytest.mark.parametrize("k", [1, 50])
+    def test_k_boundaries_valid(self, service, k):
+        got_k, fetch_k = service._resolve_k(k, rerank=False)
+        assert (got_k, fetch_k) == (k, k)
+
+    def test_rerank_fetches_4x(self, service):
+        k, fetch_k = service._resolve_k(5, rerank=True)
+        assert (k, fetch_k) == (5, 20)
+
+    @pytest.mark.parametrize("k", [0, 51])
+    def test_k_out_of_range_raises(self, service, k):
+        with pytest.raises(ValueError, match="k must be"):
+            service._resolve_k(k, rerank=False)

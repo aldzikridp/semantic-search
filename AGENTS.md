@@ -461,5 +461,7 @@ def pg_container():
 | ------ | --------- |
 | `README.md` | User-facing documentation |
 | `AGENTS.md` | This file — agent instructions |
+| `PLAN.md` | Current optimization plan (batched inserts, search dedupe, pooling) |
+| `BENCHMARKS.md` | Performance benchmark results and methodology |
 | `docs/` | Comprehensive documentation |
 | `docs/api-reference.md` | HTTP API reference for serve mode |

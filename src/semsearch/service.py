@@ -611,17 +611,11 @@ f"WHERE source LIKE %s",
             SearchError: Search or rerank failed.
         """
         import time as _time
-        if k is None:
-            k = self.settings.default_k
-        if not (1 <= k <= 50):
-            raise ValueError(f"k must be between 1 and 50, got {k}")
-
-        # When reranking, fetch more candidates for better reranking quality
-        fetch_k = k * 4 if rerank else k
+        k, fetch_k = self._resolve_k(k, rerank)
 
         try:
             t0 = _time.monotonic()
-            results_with_scores = self.store.similarity_search_with_score(
+            raw = self.store.similarity_search_with_score(
                 query,
                 k=fetch_k,
                 filter=filter,
@@ -630,50 +624,9 @@ f"WHERE source LIKE %s",
         except Exception as e:
             raise SearchError(f"Search failed: {e}") from e
 
-        # Convert to SearchResult
-        results = []
-        for doc, distance in results_with_scores:
-            score = 1.0 - distance
-            results.append(
-                SearchResult(
-                    id=doc.metadata.get("langchain_id", ""),
-                    content=doc.page_content,
-                    score=score,
-                    source=doc.metadata.get("source"),
-                    chunk_index=doc.metadata.get("chunk_index"),
-                    page=doc.metadata.get("page"),
-                    row=doc.metadata.get("row"),
-                    doc_type=doc.metadata.get("doc_type"),
-                    metadata=doc.metadata,
-                )
-            )
-
-        # Rerank if requested
+        results = self._to_search_results(raw)
         if rerank:
-            reranker = self.reranker
-            if reranker is None:
-                raise SearchError(
-                    "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL "
-                    "and SEMSEARCH_RERANKER__MODEL in .env"
-                )
-            # Extract documents from results for reranking
-            docs = []
-            for r in results:
-                doc = Document(
-                    page_content=r.content,
-                    metadata={**r.metadata, "_search_result": r},
-                )
-                docs.append(doc)
-
-            reranked_docs = reranker.rerank(query, docs, top_n=k)
-
-            # Build new results from reranked docs
-            results = []
-            for doc in reranked_docs:
-                sr = doc.metadata.pop("_search_result")
-                sr.metadata["rerank_score"] = doc.metadata.get("rerank_score")
-                results.append(sr)
-
+            results = self._apply_rerank(query, results, k)
         return results[:k]
 
     async def asearch(
@@ -687,15 +640,10 @@ f"WHERE source LIKE %s",
 
         Uses async versions of embedding and DB calls to avoid blocking.
         """
-        if k is None:
-            k = self.settings.default_k
-        if not (1 <= k <= 50):
-            raise ValueError(f"k must be between 1 and 50, got {k}")
-
-        fetch_k = k * 4 if rerank else k
+        k, fetch_k = self._resolve_k(k, rerank)
 
         try:
-            results_with_scores = await self.store.asimilarity_search_with_score(
+            raw = await self.store.asimilarity_search_with_score(
                 query,
                 k=fetch_k,
                 filter=filter,
@@ -703,7 +651,30 @@ f"WHERE source LIKE %s",
         except Exception as e:
             raise SearchError(f"Search failed: {e}") from e
 
-        # Convert to SearchResult
+        results = self._to_search_results(raw)
+        if rerank:
+            # Reranker is sync — run the whole rerank flow in a thread.
+            results = await asyncio.to_thread(self._apply_rerank, query, results, k)
+        return results[:k]
+
+    def _resolve_k(self, k: int | None, rerank: bool) -> tuple[int, int]:
+        """Validate *k* and return ``(k, fetch_k)``. Raises ValueError."""
+        if k is None:
+            k = self.settings.default_k
+        if not (1 <= k <= 50):
+            raise ValueError(f"k must be between 1 and 50, got {k}")
+        # When reranking, fetch more candidates for better reranking quality
+        fetch_k = k * 4 if rerank else k
+        return k, fetch_k
+
+    @staticmethod
+    def _to_search_results(
+        results_with_scores: list[tuple[Document, float]],
+    ) -> list[SearchResult]:
+        """Convert (Document, cosine_distance) pairs to SearchResults.
+
+        Score conversion per spec: score = 1.0 - cosine_distance.
+        """
         results = []
         for doc, distance in results_with_scores:
             score = 1.0 - distance
@@ -720,32 +691,44 @@ f"WHERE source LIKE %s",
                     metadata=doc.metadata,
                 )
             )
+        return results
 
-        # Rerank if requested (reranker is sync, run in thread)
-        if rerank:
-            reranker = self.reranker
-            if reranker is None:
-                raise SearchError(
-                    "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL "
-                    "and SEMSEARCH_RERANKER__MODEL in .env"
-                )
-            docs = []
-            for r in results:
-                doc = Document(
-                    page_content=r.content,
-                    metadata={**r.metadata, "_search_result": r},
-                )
-                docs.append(doc)
+    @staticmethod
+    def _rerank_docs(results: list[SearchResult]) -> list[Document]:
+        """Wrap SearchResults in Documents carrying the result via metadata.
 
-            reranked_docs = await asyncio.to_thread(reranker.rerank, query, docs, k)
+        The original SearchResult round-trips in ``_search_result`` so the
+        reranked order can be mapped back without rebuilding from scratch.
+        """
+        return [
+            Document(page_content=r.content, metadata={**r.metadata, "_search_result": r})
+            for r in results
+        ]
 
-            results = []
-            for doc in reranked_docs:
-                sr = doc.metadata.pop("_search_result")
-                sr.metadata["rerank_score"] = doc.metadata.get("rerank_score")
-                results.append(sr)
+    def _apply_rerank(
+        self, query: str, results: list[SearchResult], k: int
+    ) -> list[SearchResult]:
+        """Shared rerank flow: validate config, rerank, re-inject scores.
 
-        return results[:k]
+        Sync call — async callers wrap in ``asyncio.to_thread``.
+        """
+        reranker = self.reranker
+        if reranker is None:
+            raise SearchError(
+                "Reranker not configured. Set SEMSEARCH_RERANKER__BASE_URL "
+                "and SEMSEARCH_RERANKER__MODEL in .env"
+            )
+
+        docs = self._rerank_docs(results)
+        reranked_docs = reranker.rerank(query, docs, top_n=k)
+
+        # Build new results from reranked docs
+        reranked_results = []
+        for doc in reranked_docs:
+            sr = doc.metadata.pop("_search_result")
+            sr.metadata["rerank_score"] = doc.metadata.get("rerank_score")
+            reranked_results.append(sr)
+        return reranked_results
 
     # ---- Stats ----
 
